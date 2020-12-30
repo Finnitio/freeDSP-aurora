@@ -17,3 +17,5 @@ fp-info-cache
 SOURCES/build-sigma2aurora-Desktop_Qt_5_12_5_clang_64bit-Debug
 RELEASES
 OEM
+.vscode/c_cpp_properties.json
+.gitignore
