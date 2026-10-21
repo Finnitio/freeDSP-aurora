@@ -6,51 +6,51 @@
 
 static void firstUpdateStartsConnecting()
 {
-  StaRetry p;
-  assert(p.update(false, 0) == StaRetry::BEGIN);
-  assert(p.update(false, 250) == StaRetry::NONE);
+  StaRetry retry;
+  assert(retry.update(false, 0) == StaRetry::BEGIN);
+  assert(retry.update(false, 250) == StaRetry::NONE);
 }
 
 // Every kind of failure (wrong password, SSID not found, ...) looks the same
 // from here: the attempt did not reach "connected" within 15 s.
 static void unreachableNetworkStopsAfterThreeAttempts()
 {
-  StaRetry p;
-  assert(p.update(false, 0) == StaRetry::BEGIN);
-  assert(p.update(false, 14999) == StaRetry::NONE);
-  assert(p.update(false, 15000) == StaRetry::BEGIN);   // 1st failure, retry
-  assert(p.update(false, 30000) == StaRetry::BEGIN);   // 2nd failure, retry
-  assert(p.update(false, 45000) == StaRetry::STOP);    // 3rd failure, give up
-  assert(p.update(false, 50000) == StaRetry::NONE);
+  StaRetry retry;
+  assert(retry.update(false, 0) == StaRetry::BEGIN);
+  assert(retry.update(false, 14999) == StaRetry::NONE);
+  assert(retry.update(false, 15000) == StaRetry::BEGIN);   // 1st failure, retry
+  assert(retry.update(false, 30000) == StaRetry::BEGIN);   // 2nd failure, retry
+  assert(retry.update(false, 45000) == StaRetry::STOP);    // 3rd failure, give up
+  assert(retry.update(false, 50000) == StaRetry::NONE);
 }
 
 static void afterStopRetriesOnceEvery60s()
 {
-  StaRetry p;
-  p.update(false, 0);
-  p.update(false, 15000);
-  p.update(false, 30000);
-  assert(p.update(false, 45000) == StaRetry::STOP);
-  assert(p.update(false, 104999) == StaRetry::NONE);
-  assert(p.update(false, 105000) == StaRetry::BEGIN);  // 60 s later: one try
-  assert(p.update(false, 119999) == StaRetry::NONE);
-  assert(p.update(false, 120000) == StaRetry::STOP);   // failed again, stop
-  assert(p.update(false, 179999) == StaRetry::NONE);
-  assert(p.update(false, 180000) == StaRetry::BEGIN);
+  StaRetry retry;
+  retry.update(false, 0);
+  retry.update(false, 15000);
+  retry.update(false, 30000);
+  assert(retry.update(false, 45000) == StaRetry::STOP);
+  assert(retry.update(false, 104999) == StaRetry::NONE);
+  assert(retry.update(false, 105000) == StaRetry::BEGIN);  // 60 s later: one try
+  assert(retry.update(false, 119999) == StaRetry::NONE);
+  assert(retry.update(false, 120000) == StaRetry::STOP);   // failed again, stop
+  assert(retry.update(false, 179999) == StaRetry::NONE);
+  assert(retry.update(false, 180000) == StaRetry::BEGIN);
 }
 
 static void lostConnectionGetsFreshAttempts()
 {
-  StaRetry p;
-  p.update(false, 0);
-  p.update(false, 15000);                              // 1 failure
-  p.update(false, 30000);                              // 2 failures
-  assert(p.update(true, 31000) == StaRetry::NONE);     // connected: reset
-  assert(p.update(true, 90000) == StaRetry::NONE);
-  assert(p.update(false, 100000) == StaRetry::BEGIN);  // link lost
-  assert(p.update(false, 115000) == StaRetry::BEGIN);  // 3 tries again
-  assert(p.update(false, 130000) == StaRetry::BEGIN);
-  assert(p.update(false, 145000) == StaRetry::STOP);
+  StaRetry retry;
+  retry.update(false, 0);
+  retry.update(false, 15000);                              // 1 failure
+  retry.update(false, 30000);                              // 2 failures
+  assert(retry.update(true, 31000) == StaRetry::NONE);     // connected: reset
+  assert(retry.update(true, 90000) == StaRetry::NONE);
+  assert(retry.update(false, 100000) == StaRetry::BEGIN);  // link lost
+  assert(retry.update(false, 115000) == StaRetry::BEGIN);  // 3 tries again
+  assert(retry.update(false, 130000) == StaRetry::BEGIN);
+  assert(retry.update(false, 145000) == StaRetry::STOP);
 }
 
 int main()

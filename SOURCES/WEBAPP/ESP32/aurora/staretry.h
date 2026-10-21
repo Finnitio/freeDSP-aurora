@@ -35,16 +35,16 @@ public:
       return begin( nowMs );
 
     case CONNECTING:
-      if( nowMs - since < ATTEMPT_TIMEOUT_MS )
+      if( nowMs - stateSinceMs < ATTEMPT_TIMEOUT_MS )
         return NONE;
       if( ++failures < MAX_FAILURES )
         return begin( nowMs );
       state = STOPPED;
-      since = nowMs;
+      stateSinceMs = nowMs;
       return STOP;
 
     case STOPPED:
-      if( nowMs - since < RETRY_PAUSE_MS )
+      if( nowMs - stateSinceMs < RETRY_PAUSE_MS )
         return NONE;
       failures = MAX_FAILURES - 1;  // one attempt, then stop again
       return begin( nowMs );
@@ -60,12 +60,12 @@ private:
   Action begin( uint32_t nowMs )
   {
     state = CONNECTING;
-    since = nowMs;
+    stateSinceMs = nowMs;
     return BEGIN;
   }
 
   State state = START;
-  uint32_t since = 0;
+  uint32_t stateSinceMs = 0;
   int failures = 0;
 };
 
