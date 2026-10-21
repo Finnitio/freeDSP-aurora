@@ -28,6 +28,7 @@
 #include "web.h"
 #include "channelnames.h"
 #include "inputrouting.h"
+#include "staretry.h"
 
 /**
  * These are required for the espmake32 automatic library resolver
@@ -207,14 +208,20 @@ void updateUI( void )
  */
 void myWiFiTask(void *pvParameters)
 {
-  wl_status_t state;
-  bool firstConnectAttempt = true;
-  bool myWiFiFirstConnect = true;
-  int cntrAuthFailure = 0;
+  bool wasConnected = false;
+  StaRetry staRetry;
   IPAddress ip(192, 168, 5, 1);
   IPAddress subnet(255, 255, 255, 0);
+  const bool haveSsid = Settings.ssid.length() > 0;
 
-  WiFi.mode(WIFI_AP_STA);
+  // Credentials live in our settings file; don't let the core copy them to NVS
+  // and don't let it reconnect on its own (it would scan forever and drag the
+  // AP channel along). Reconnects are driven by StaRetry below.
+  WiFi.persistent(false);
+  WiFi.setAutoReconnect(false);
+  // Mode is set once here and never changed again, so the AP is never dropped.
+  // softAP() and softAPConfig() below are applied after this mode change.
+  WiFi.mode(haveSsid ? WIFI_AP_STA : WIFI_AP);
   WiFi.setHostname(AP_HOSTNAME);
   // Start access point
   if( Settings.pwdap.length() > 0 )
@@ -237,80 +244,45 @@ void myWiFiTask(void *pvParameters)
   // Start server
   server.begin();
 
+  // No SSID: pure AP, STA is never started
+  if(!haveSsid)
+    vTaskDelete(NULL);
+
   while(true)
   {
-    if((Settings.ssid.length() > 0) &&  (cntrAuthFailure < 10))
+    bool connected = (WiFi.status() == WL_CONNECTED);
+    switch(staRetry.update(connected, millis()))
     {
-      state = WiFi.status();
-      if(state != WL_CONNECTED)
-      {
-        //if (state == WL_NO_SHIELD)
-        if(firstConnectAttempt)
-        {
-          firstConnectAttempt = false;
-          Serial.print(F("Connecting to "));
-          Serial.println(Settings.ssid.c_str());
-          WiFi.begin(Settings.ssid.c_str(), Settings.password.c_str());
-          cntrAuthFailure++;
-        }
-        else if(state == WL_IDLE_STATUS)
-        {
-          Serial.println(F("Idle"));
-        }
-        else if(state == WL_NO_SSID_AVAIL)
-        {
-          Serial.println(F("No SSID available"));
-        }
-        else if(state == WL_CONNECTION_LOST)
-        {
-          Serial.println(F("WiFi connection lost"));
-          WiFi.disconnect(true);
-          cntrAuthFailure++;
-        }
-        // else if( state == WL_SCAN_COMPLETED )
-        else if(state == WL_CONNECT_FAILED)
-        {
-          Serial.println(F("WiFi connection failed"));
-          WiFi.disconnect(true);
-          cntrAuthFailure++;
-        }
-        else if(state == WL_DISCONNECTED)
-        {
-          if(!myWiFiFirstConnect)
-          {
-            myWiFiFirstConnect = true;
-            Serial.println(F("WiFi disconnected"));
-          }
-          Serial.println(F("No Connection -> Wifi Reset"));
-          WiFi.persistent(false);
-          WiFi.disconnect();
-          WiFi.mode(WIFI_OFF);
-          WiFi.mode(WIFI_AP_STA);
-          delay(1000);
-          // WiFi.config(ip, gateway, subnet); // Only for fix IP needed
-          WiFi.begin(Settings.ssid.c_str(), Settings.password.c_str());
-          delay(3000);
-          cntrAuthFailure++;
-        }
-        vTaskDelay (250); // Check again in about 250ms
-      }
-      else // We have connection
-      {
-        if(myWiFiFirstConnect) // Report only once
-        {
-          myWiFiFirstConnect = false;
-          cntrAuthFailure = 0;
-          Serial.println(F("Connected"));
-          Serial.print(F("IP address: "));
-          Serial.println(WiFi.localIP());
-          Serial.println(WiFi.getHostname());
-          needUpdateUI = true;
-        }
-        vTaskDelay(5000); // Check again in about 5s
-      }
+    case StaRetry::BEGIN:
+      Serial.print(F("Connecting to "));
+      Serial.println(Settings.ssid.c_str());
+      WiFi.disconnect();  // abort a pending attempt; keeps the mode (AP stays up)
+      WiFi.begin(Settings.ssid.c_str(), Settings.password.c_str());
+      break;
+    case StaRetry::STOP:
+      Serial.println(F("WiFi connection failed, retrying in 60s"));
+      WiFi.disconnect();
+      break;
+    default:
+      break;
     }
-    else
-      vTaskDelay(5000);
+
+    if(connected && !wasConnected) // Report only once
+    {
+      Serial.println(F("Connected"));
+      Serial.print(F("IP address: "));
+      Serial.println(WiFi.localIP());
+      Serial.println(WiFi.getHostname());
+      needUpdateUI = true;
+    }
+    else if(!connected && wasConnected)
+    {
+      Serial.println(F("WiFi disconnected"));
+      needUpdateUI = true;
+    }
+    wasConnected = connected;
+
+    vTaskDelay(250); // Check again in about 250ms
   }
 }
 
