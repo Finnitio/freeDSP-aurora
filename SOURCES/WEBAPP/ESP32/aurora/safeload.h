@@ -8,8 +8,9 @@
  *  safeload module of the SigmaStudio program. No Arduino or I2C dependencies.
  *
  *  Sequence: the 5 words go into data_SafeLoad[0..4] (consecutive parameter
- *  addresses, one burst), then the target address goes into address_SafeLoad.
- *  That last write arms the transfer: the DSP copies the 5 words to
+ *  addresses, one burst), then the target address goes into address_SafeLoad
+ *  and the word count 5 into num_SafeLoad (address_SafeLoad + 1).
+ *  Writing num_SafeLoad triggers the transfer: the DSP copies the 5 words to
  *  target..target+4 at a frame boundary, so the filter never runs with a mix
  *  of old and new coefficients.
  */
@@ -52,9 +53,12 @@ static inline void safeloadBiquad( SafeloadPort& port, const SafeloadCfg& cfg,
   }
 
   port.write( cfg.data, buf, 20 );
-  uint8_t tgt[4];
+  // address_SafeLoad, then num_SafeLoad (the next parameter, ADAU1452 data
+  // sheet Table 54): writing the word count triggers the transfer.
+  uint8_t tgt[8];
   safeloadPutWord( tgt, target );
-  port.write( cfg.addr, tgt, 4 );
+  safeloadPutWord( tgt + 4, 5 );
+  port.write( cfg.addr, tgt, 8 );
 }
 
 #endif

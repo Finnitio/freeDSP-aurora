@@ -39,12 +39,15 @@ static void safeloadWritesDataThenTargetAddress()
   assert(port.txs[0].data[4] == 0xFF && port.txs[0].data[7] == 0x01);
   assert(port.txs[0].data[12] == 0x12 && port.txs[0].data[15] == 0x78);
   assert(port.txs[0].data[16] == 0xFE && port.txs[0].data[19] == 0x98);
-  // the target address is written last: it triggers the transfer
+  // target address, then num_SafeLoad (= 5, at address+1) which triggers the transfer
   assert(port.txs[1].reg == 15401);
-  assert(port.txs[1].data.size() == 4);
+  assert(port.txs[1].data.size() == 8);
   uint32_t target = (port.txs[1].data[0] << 24) | (port.txs[1].data[1] << 16)
                   | (port.txs[1].data[2] << 8) | port.txs[1].data[3];
   assert(target == 15548);
+  uint32_t num = (port.txs[1].data[4] << 24) | (port.txs[1].data[5] << 16)
+               | (port.txs[1].data[6] << 8) | port.txs[1].data[7];
+  assert(num == 5);
 }
 
 static void withoutSafeloadAddressesFallsBackToDirectWrites()
