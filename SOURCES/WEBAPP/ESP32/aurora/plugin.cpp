@@ -5,6 +5,8 @@
 #include "plugin.h"
 
 tSettings Settings;
+tMatrixMeta matrixMeta;
+String pluginKind;
 
 tInput paramInputs[MAX_NUM_INPUTS];
 tHPLP paramHP[MAX_NUM_HPS];
@@ -71,7 +73,9 @@ void readPluginMeta( void )
 
   if( filePluginMeta )
   {
-    StaticJsonDocument<5000> jsonDoc;
+    // The matrix plugin.ini lists every biquad address and outgrows 5000 bytes.
+    size_t docSize = filePluginMeta.size() * 3 + 512;
+    DynamicJsonDocument jsonDoc( docSize > 5000 ? docSize : 5000 );
     DeserializationError err = deserializeJson( jsonDoc, filePluginMeta );
     if( err )
     {
@@ -199,6 +203,28 @@ void readPluginMeta( void )
       idx += paramFir[ii].numCoeffs;
       if(idx > SIZE_IR_MEMORY)
         Serial.println("[ERROR] Not enough IR memory.");*/
+    }
+
+    pluginKind = String( jsonPluginMeta["kind"] | "" );
+    if( pluginKind == "matrix" )
+    {
+      matrixMeta.nbus = min( (int)( jsonPluginMeta["nbus"] | 0 ), MAX_MATRIX_BUS );
+      matrixMeta.nout = min( (int)( jsonPluginMeta["nout"] | 0 ), MAX_MATRIX_OUT );
+      matrixMeta.nbiquad = min( (int)( jsonPluginMeta["nbiquad"] | 0 ), MAX_MATRIX_BIQUAD );
+      matrixMeta.maxdly = jsonPluginMeta["maxdly"] | 0;
+      for( int ii = 0; ii < matrixMeta.nbus * matrixMeta.nbiquad; ii++ )
+        matrixMeta.busbiquad[ii] = jsonPluginMeta["busbiquad"][ii] | 0;
+      for( int ii = 0; ii < matrixMeta.nout * matrixMeta.nbiquad; ii++ )
+        matrixMeta.outbiquad[ii] = jsonPluginMeta["outbiquad"][ii] | 0;
+      for( int ii = 0; ii < matrixMeta.nbus; ii++ )
+        matrixMeta.busgain[ii] = jsonPluginMeta["busgain"][ii] | 0;
+      for( int ii = 0; ii < matrixMeta.nout; ii++ )
+      {
+        matrixMeta.outgain[ii] = jsonPluginMeta["outgain"][ii] | 0;
+        matrixMeta.outpol[ii] = jsonPluginMeta["outpol"][ii] | 0;
+        matrixMeta.outdly[ii] = jsonPluginMeta["outdly"][ii] | 0;
+        matrixMeta.outroute[ii] = jsonPluginMeta["outroute"][ii] | 0;
+      }
     }
 
     masterVolume.addr = jsonPluginMeta["master"].as<String>().toInt();

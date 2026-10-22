@@ -24,6 +24,8 @@
 #include "i2cworker.h"
 #include "bodybuffer.h"
 #include "apconfig.h"
+#include "matrix.h"
+#include "matrixpage.h"
 
 #if HAVE_DISPLAY
 extern void updateUI(void);
@@ -1231,6 +1233,7 @@ void handlePostPresetJson( JsonObject root )
 
   initUserParams();
   uploadUserParams();
+  matrixLoadPreset();
 
   updateAddOn();
 
@@ -1787,12 +1790,12 @@ String handleGetAllNamesJson( void )
 }
 
 //==============================================================================
-/*! Reassembles the chunked POST body, parses it and queues `apply` for the I2C
- *  worker. The request is answered right away; nothing here touches I2C.
+/*! Reassembles the chunked POST body and parses it. Returns the document once
+ *  the body is complete and valid; otherwise NULL (more chunks to come, or the
+ *  request has been answered with an error).
  */
-static void postJson( AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total,
-                      void (*apply)( JsonObject ), size_t jsonCapacity = 1024,
-                      const char* (*validate)( JsonObject ) = NULL )
+static std::shared_ptr<DynamicJsonDocument> readJsonBody( AsyncWebServerRequest* request, uint8_t* data, size_t len,
+                                                          size_t index, size_t total, size_t jsonCapacity )
 {
   char* body = (char*)request->_tempObject;  // freed by the request
   const bool hadBody = ( body != NULL );
@@ -1803,10 +1806,10 @@ static void postJson( AsyncWebServerRequest* request, uint8_t* data, size_t len,
   {
     if( index == 0 || hadBody )  // answer once
       request->send( 413, "text/plain", "Bad or too large body" );
-    return;
+    return NULL;
   }
   if( res != BODY_COMPLETE )
-    return;
+    return NULL;
 
   std::shared_ptr<DynamicJsonDocument> doc = std::make_shared<DynamicJsonDocument>( jsonCapacity );
   DeserializationError err = deserializeJson( *doc, (const char*)body );
@@ -1815,8 +1818,22 @@ static void postJson( AsyncWebServerRequest* request, uint8_t* data, size_t len,
     Serial.print( F("[ERROR] postJson(): Deserialization failed. ") );
     Serial.println( err.c_str() );
     request->send( 400, "text/plain", err.c_str() );
-    return;
+    return NULL;
   }
+  return doc;
+}
+
+//==============================================================================
+/*! Reads the POST body and queues `apply` for the I2C worker. The request is
+ *  answered right away; nothing here touches I2C.
+ */
+static void postJson( AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total,
+                      void (*apply)( JsonObject ), size_t jsonCapacity = 1024,
+                      const char* (*validate)( JsonObject ) = NULL )
+{
+  std::shared_ptr<DynamicJsonDocument> doc = readJsonBody( request, data, len, index, total, jsonCapacity );
+  if( !doc )
+    return;
 
   if( validate )
   {
@@ -1836,7 +1853,22 @@ static void postJson( AsyncWebServerRequest* request, uint8_t* data, size_t len,
 
 void setupWebserver (void)
 {
-  if( SPIFFS.exists( "/dsp.html" ) )
+  if( isMatrixPlugin() )
+  {
+    // The matrix page is part of the firmware; the model runs here, only the DSP writes are queued.
+    server.on( "/",       HTTP_GET, [](AsyncWebServerRequest *request ) { request->send( 200, "text/html", matrixpage_html ); });
+    server.on( "/matrix", HTTP_GET, [](AsyncWebServerRequest *request ) { request->send( 200, "application/json", matrixState().c_str() ); });
+    server.on( "/matrix", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
+    {
+      std::shared_ptr<DynamicJsonDocument> doc = readJsonBody( request, data, len, index, total, 1024 );
+      if( !doc )
+        return;
+      std::string reply;
+      bool ok = matrixApply( doc->as<JsonObject>(), reply );
+      request->send( ok ? 200 : 400, ok ? "application/json" : "text/plain", reply.c_str() );
+    });
+  }
+  else if( SPIFFS.exists( "/dsp.html" ) )
     server.on( "/",          HTTP_GET, [](AsyncWebServerRequest *request ) { request->send( SPIFFS, "/dsp.html", "text/html" ); });
   else
     server.on( "/",          HTTP_GET, [](AsyncWebServerRequest *request ) { request->send( 200, "text/html", fallback_html ); });

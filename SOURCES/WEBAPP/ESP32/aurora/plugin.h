@@ -150,7 +150,26 @@ struct tSpdifOutput
   uint32_t selectionRight;
 };
 
+/*! Addresses of a matrix plugin (plugin.ini kind "matrix"). Biquad lists are
+ *  channel-major: nbiquad first-coefficient addresses per Channel. */
+struct tMatrixMeta
+{
+  int nbus;
+  int nout;
+  int nbiquad;
+  int maxdly;  //!< max Output delay in samples
+  uint16_t busbiquad[MAX_MATRIX_BUS * MAX_MATRIX_BIQUAD];
+  uint16_t outbiquad[MAX_MATRIX_OUT * MAX_MATRIX_BIQUAD];
+  uint16_t busgain[MAX_MATRIX_BUS];
+  uint16_t outgain[MAX_MATRIX_OUT];
+  uint16_t outpol[MAX_MATRIX_OUT];
+  uint16_t outdly[MAX_MATRIX_OUT];
+  uint16_t outroute[MAX_MATRIX_OUT];
+};
+
 extern tSettings Settings;
+extern tMatrixMeta matrixMeta;
+extern String pluginKind;  //!< "matrix" or "" (older plugins)
 
 extern tInput paramInputs[MAX_NUM_INPUTS];
 extern tHPLP paramHP[MAX_NUM_HPS];

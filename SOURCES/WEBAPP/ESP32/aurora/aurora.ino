@@ -32,6 +32,7 @@
 #include "staretry.h"
 #include "apconfig.h"
 #include "i2cworker.h"
+#include "matrix.h"
 
 /**
  * These are required for the espmake32 automatic library resolver
@@ -550,6 +551,7 @@ void setup()
   initUserParams();
   Serial.println(F("[OK]"));
   readPluginMeta();
+  matrixInit();
 
   //----------------------------------------------------------------------------
   //--- Read virtual input channel routing (only if supported by plugin)
@@ -579,6 +581,7 @@ void setup()
   //--- Upload user parameters to DSP
   //----------------------------------------------------------------------------
   uploadUserParams();
+  matrixLoadPreset();
 
   //----------------------------------------------------------------------------
   //--- Configure Webserver
@@ -631,6 +634,7 @@ void update_preset(void) {
   softMuteDAC();
   initUserParams();
   uploadUserParams();
+  matrixLoadPreset();
   updateAddOn();
   softUnmuteDAC();
 }
@@ -675,6 +679,8 @@ void loop()
   TIMERG0.wdt_wprotect=TIMG_WDT_WKEY_VALUE;
   TIMERG0.wdt_feed=1;
   TIMERG0.wdt_wprotect=0;
+
+  matrixLoop();
 
 
   #if HAVE_ROTARYENCODER

@@ -11,6 +11,10 @@ void ADAU1452_WRITE_REGISTER( uint16_t reg, byte msb, byte lsb );
  */
 void ADAU1452_WRITE_BLOCK( uint16_t regaddr, byte val[], uint16_t len );
 
+/*! Converts a value to the DSP's 8.24 fixed point format.
+ */
+uint32_t convertTo824( double val );
+
 /*! Sets a new input selection on DSP.
  */
 void setInput( const int idx );
