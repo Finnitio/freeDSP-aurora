@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
+#include <DNSServer.h>
 #include "AsyncJson.h"
 #include <ArduinoJson.h>
 #include "soc/timer_group_struct.h"
@@ -29,6 +30,7 @@
 #include "channelnames.h"
 #include "inputrouting.h"
 #include "staretry.h"
+#include "apconfig.h"
 #include "i2cworker.h"
 
 /**
@@ -47,6 +49,7 @@
 File fileDspProgram;
 
 bool changeWifiState = false;
+DNSServer dnsServer;
 
 //------------------------------------------------------------------------------
 //
@@ -212,22 +215,45 @@ static void startAP()
   IPAddress ip(192, 168, 5, 1);
   IPAddress subnet(255, 255, 255, 0);
 
-  if( Settings.pwdap.length() > 0 )
+  // Settings from an older file or edited by hand may be invalid
+  const char* err = apConfigError(Settings.pwdap.c_str(), Settings.apname.c_str(), Settings.apchannel);
+  String name = Settings.apname;
+  String pwd = Settings.pwdap;
+  int channel = Settings.apchannel;
+  if(err)
+  {
+    Serial.print(F("[ERROR] AP settings: "));
+    Serial.println(err);
+    Serial.println(F("Falling back to the default AP name, open, default channel"));
+    name = AP_HOSTNAME;
+    pwd = "";
+    channel = AP_CHANNEL_DEFAULT;
+  }
+
+  bool ok;
+  if( pwd.length() > 0 )
   {
     Serial.print(F("AP password protected "));
-    Serial.println(Settings.apname);
-    WiFi.softAP(Settings.apname.c_str(), Settings.pwdap.c_str());
+    Serial.println(name);
+    ok = WiFi.softAP(name.c_str(), pwd.c_str(), channel);
   }
   else
   {
     Serial.print(F("AP open: "));
-    Serial.println(Settings.apname);
-    WiFi.softAP(Settings.apname.c_str());
+    Serial.println(name);
+    ok = WiFi.softAP(name.c_str(), NULL, channel);
   }
+  Serial.print(F("softAP "));
+  Serial.print(ok ? F("started, channel ") : F("FAILED, channel "));
+  Serial.println(channel);
   delay(100);
 
   if(!WiFi.softAPConfig(ip, ip, subnet))
     Serial.println(F("AP Config Failed"));
+
+  // Answer every DNS name with the AP address
+  dnsServer.stop();
+  dnsServer.start(53, "*", ip);
 }
 
 //==============================================================================
@@ -334,7 +360,12 @@ void myWiFiTask(void *pvParameters)
     }
     wasConnected = connected;
 
-    vTaskDelay(250); // Check again in about 250ms
+    // DNS requests are rare; poll a few times within the 250 ms cycle
+    for(int i = 0; i < 5; i++)
+    {
+      dnsServer.processNextRequest();
+      vTaskDelay(50);
+    }
   }
 }
 
