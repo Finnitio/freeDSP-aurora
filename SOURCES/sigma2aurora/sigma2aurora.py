@@ -541,7 +541,7 @@ for module in root.findall('IC/Module'):
                 matrix_maxdly = max(matrix_maxdly, int(maxdly.group(1)))
 
     elif cellname.text.lower() == 'plugin.sumgain':
-        pass
+        pass  # known block without runtime parameters; keeps it out of the "unknown block" warning below
 
     elif cellname.text.lower().startswith('plugin.'):
         print("[WARNING] Unkown dsp block in plugin: " + cellname.text)

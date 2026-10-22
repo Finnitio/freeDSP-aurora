@@ -182,8 +182,6 @@ void handlePostInputRoutingJson( JsonObject root )
 
   softMuteDAC();
 
-
-
   for(int mm = 0; mm < kNumSourceNames; mm++)
   {
     sourceNames[mm] = root["sourceNames"][mm].as<String>().substring(0, 16);

@@ -86,6 +86,12 @@ static void writeBiquad( uint16_t addr, const float* a, const float* b )
 {
   const uint32_t words[5] = { convertTo824( b[2] ), convertTo824( b[1] ), convertTo824( b[0] ),
                               convertTo824( a[2] ), convertTo824( a[1] ) };
+  static bool warned = false;
+  if( !warned && ( safeloadCfg.data == 0 || safeloadCfg.addr == 0 ) )
+  {
+    warned = true;
+    Serial.println( F("[WARNING] plugin.ini has no safeload entry, writing biquads directly (not atomic)") );
+  }
   WirePort port;
   I2cLock lock;  // both transactions back to back
   safeloadBiquad( port, safeloadCfg, addr, words );
