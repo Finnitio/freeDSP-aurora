@@ -63,6 +63,35 @@ uint32_t convertTo824( double val )
 }
 
 //==============================================================================
+/*! I2C port of the safeload sequence: one transaction per call, bus held by the caller.
+ */
+class WirePort : public SafeloadPort
+{
+public:
+  void write( uint16_t reg, const uint8_t* data, size_t len ) override
+  {
+    Wire.beginTransmission( DSP_ADDR );
+    Wire.write( (byte)( (reg >> 8) & 0xFF ) );
+    Wire.write( (byte)(  reg       & 0xFF ) );
+    Wire.write( data, len );
+    Wire.endTransmission( true );
+  }
+};
+
+//==============================================================================
+/*! Writes one biquad atomically (safeload). a[], b[]: 3 coefficients each as
+ *  made by the AudioFilterFactory; order on the DSP is B2 B1 B0 A2 A1.
+ */
+static void writeBiquad( uint16_t addr, const float* a, const float* b )
+{
+  const uint32_t words[5] = { convertTo824( b[2] ), convertTo824( b[1] ), convertTo824( b[0] ),
+                              convertTo824( a[2] ), convertTo824( a[1] ) };
+  WirePort port;
+  I2cLock lock;  // both transactions back to back
+  safeloadBiquad( port, safeloadCfg, addr, words );
+}
+
+//==============================================================================
 /*! Enables or disables the volume potentiometer
  *
  */
@@ -96,54 +125,13 @@ void setCrossover( int idx )
   {
     float a[12] = { 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0 };
     float b[12] = { 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0 };
-    byte val[4];
-    uint32_t floatval;
 
     if( !(paramCrossover[idx].lp_bypass) )
       AudioFilterFactory::makeLowPass( a, b, paramCrossover[idx].lp_typ, paramCrossover[idx].lp_fc, sampleRate );
 
     for( int ii = 0; ii < 4; ii++ )
     {
-      uint16_t addr = paramCrossover[idx].lp_addr[ii];
-      floatval = convertTo824(b[ 3*ii + 2 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B2
-      addr++;
-
-      floatval = convertTo824(b[ 3*ii + 1 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B1
-      addr++;
-
-      floatval = convertTo824(b[ 3*ii + 0 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B0
-      addr++;
-
-      floatval = convertTo824(a[ 3*ii + 2 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A2
-      addr++;
-
-      floatval = convertTo824(a[ 3*ii + 1 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A1
-      addr++;
+      writeBiquad( paramCrossover[idx].lp_addr[ii], &a[3*ii], &b[3*ii] );
     }
   }
 
@@ -152,53 +140,12 @@ void setCrossover( int idx )
   {
     float a[12] = { 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0 };
     float b[12] = { 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0 };
-    byte val[4];
-    uint32_t floatval;
     if( !(paramCrossover[idx].hp_bypass) )
       AudioFilterFactory::makeHighPass( a, b, paramCrossover[idx].hp_typ, paramCrossover[idx].hp_fc, sampleRate );
 
     for( int ii = 0; ii < 4; ii++ )
     {
-      uint16_t addr = paramCrossover[idx].hp_addr[ii];
-      floatval = convertTo824(b[ 3*ii + 2 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B2
-      addr++;
-
-      floatval = convertTo824(b[ 3*ii + 1 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B1
-      addr++;
-
-      floatval = convertTo824(b[ 3*ii + 0 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B0
-      addr++;
-
-      floatval = convertTo824(a[ 3*ii + 2 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A2
-      addr++;
-
-      floatval = convertTo824(a[ 3*ii + 1 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A1
-      addr++;
+      writeBiquad( paramCrossover[idx].hp_addr[ii], &a[3*ii], &b[3*ii] );
     }
   }
 
@@ -292,53 +239,12 @@ void setHighPass( int idx )
   {
     float a[12] = { 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0 };
     float b[12] = { 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0 };
-    byte val[4];
-    uint32_t floatval;
     if( !(paramHP[idx].bypass) )
       AudioFilterFactory::makeHighPass( a, b, paramHP[idx].typ, paramHP[idx].fc, sampleRate );
 
     for( int ii = 0; ii < 4; ii++ )
     {
-      uint16_t addr = paramHP[idx].addr[ii];
-      floatval = convertTo824(b[ 3*ii + 2 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B2
-      addr++;
-
-      floatval = convertTo824(b[ 3*ii + 1 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B1
-      addr++;
-
-      floatval = convertTo824(b[ 3*ii + 0 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B0
-      addr++;
-
-      floatval = convertTo824(a[ 3*ii + 2 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A2
-      addr++;
-
-      floatval = convertTo824(a[ 3*ii + 1 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A1
-      addr++;
+      writeBiquad( paramHP[idx].addr[ii], &a[3*ii], &b[3*ii] );
     }
   }
 }
@@ -355,50 +261,10 @@ void setHighShelving( int idx )
   {
     float a[3] = { 1.0, 0.0, 0.0 };
     float b[3] = { 1.0, 0.0, 0.0 };
-    byte val[4];
-    uint32_t floatval;
     if( !(paramHshelv[idx].bypass) )
       AudioFilterFactory::makeHighShelv( a, b, paramHshelv[idx].gain, paramHshelv[idx].fc, paramHshelv[idx].slope, sampleRate );
 
-    uint16_t addr = paramHshelv[idx].addr;
-    floatval = convertTo824(b[2]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B2
-    addr++;
-
-    floatval = convertTo824(b[1]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B1
-    addr++;
-
-    floatval = convertTo824(b[0]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B0
-    addr++;
-
-    floatval = convertTo824(a[2]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A2
-    addr++;
-
-    floatval = convertTo824(a[1]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A1
+    writeBiquad( paramHshelv[idx].addr, a, b );
   }
 }
 
@@ -441,53 +307,12 @@ void setLowPass( int idx )
   {
     float a[12] = { 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0 };
     float b[12] = { 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0 };
-    byte val[4];
-    uint32_t floatval;
     if( !(paramLP[idx].bypass) )
       AudioFilterFactory::makeLowPass( a, b, paramLP[idx].typ, paramLP[idx].fc, sampleRate );
 
     for( int ii = 0; ii < 4; ii++ )
     {
-      uint16_t addr = paramLP[idx].addr[ii];
-      floatval = convertTo824(b[ 3*ii + 2 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B2
-      addr++;
-
-      floatval = convertTo824(b[ 3*ii + 1 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B1
-      addr++;
-
-      floatval = convertTo824(b[ 3*ii + 0 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B0
-      addr++;
-
-      floatval = convertTo824(a[ 3*ii + 2 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A2
-      addr++;
-
-      floatval = convertTo824(a[ 3*ii + 1 ]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A1
-      addr++;
+      writeBiquad( paramLP[idx].addr[ii], &a[3*ii], &b[3*ii] );
     }
   }
 }
@@ -504,50 +329,10 @@ void setLowShelving( int idx )
   {
     float a[3] = { 1.0, 0.0, 0.0 };
     float b[3] = { 1.0, 0.0, 0.0 };
-    byte val[4];
-    uint32_t floatval;
     if( !(paramLshelv[idx].bypass) )
       AudioFilterFactory::makeLowShelv( a, b, paramLshelv[idx].gain, paramLshelv[idx].fc, paramLshelv[idx].slope, sampleRate );
 
-    uint16_t addr = paramLshelv[idx].addr;
-    floatval = convertTo824(b[2]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B2
-    addr++;
-
-    floatval = convertTo824(b[1]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B1
-    addr++;
-
-    floatval = convertTo824(b[0]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B0
-    addr++;
-
-    floatval = convertTo824(a[2]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A2
-    addr++;
-
-    floatval = convertTo824(a[1]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A1
+    writeBiquad( paramLshelv[idx].addr, a, b );
   }
 }
 
@@ -587,50 +372,10 @@ void setPEQ( int idx )
   {
     float a[3] = { 1.0, 0.0, 0.0 };
     float b[3] = { 1.0, 0.0, 0.0 };
-    byte val[4];
-    uint32_t floatval;
     if( !(paramPeq[idx].bypass) )
       AudioFilterFactory::makeParametricEQ( a, b, paramPeq[idx].gain, paramPeq[idx].fc, paramPeq[idx].Q, sampleRate );
 
-    uint32_t addr = paramPeq[idx].addr;
-    floatval = convertTo824(b[2]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B2
-    addr++;
-
-    floatval = convertTo824(b[1]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B1
-    addr++;
-
-    floatval = convertTo824(b[0]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B0
-    addr++;
-
-    floatval = convertTo824(a[2]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A2
-    addr++;
-
-    floatval = convertTo824(a[1]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A1
+    writeBiquad( paramPeq[idx].addr, a, b );
   }
 }
 
@@ -648,50 +393,10 @@ void setPeqBank(int idx)
     {
       float a[3] = { 1.0, 0.0, 0.0 };
       float b[3] = { 1.0, 0.0, 0.0 };
-      byte val[4];
-      uint32_t floatval;
       if(!(paramPeqBank[idx].bypass[nn]))
         AudioFilterFactory::makeParametricEQ(a, b, paramPeqBank[idx].gain[nn], paramPeqBank[idx].fc[nn], paramPeqBank[idx].Q[nn], sampleRate);
 
-      uint32_t addr = paramPeqBank[idx].addr[nn];
-      floatval = convertTo824(b[2]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK(addr, val, 4);  // B2
-      addr++;
-
-      floatval = convertTo824(b[1]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK(addr, val, 4);  // B1
-      addr++;
-
-      floatval = convertTo824(b[0]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK(addr, val, 4);  // B0
-      addr++;
-
-      floatval = convertTo824(a[2]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK(addr, val, 4);  // A2
-      addr++;
-
-      floatval = convertTo824(a[1]);
-      val[0] = (floatval >> 24 ) & 0xFF;
-      val[1] = (floatval >> 16 ) & 0xFF;
-      val[2] = (floatval >> 8 ) & 0xFF;
-      val[3] =  floatval & 0xFF;
-      ADAU1452_WRITE_BLOCK(addr, val, 4);  // A1
+      writeBiquad( paramPeqBank[idx].addr[nn], a, b );
     }
   }
 }
@@ -708,8 +413,6 @@ void setPhase( int idx )
   {
     float a[3] = { 1.0, 0.0, 0.0 };
     float b[3] = { 1.0, 0.0, 0.0 };
-    byte val[4];
-    uint32_t floatval;
     if( !paramPhase[idx].bypass )
       AudioFilterFactory::makeAllpass( a, b, paramPhase[idx].fc, paramPhase[idx].Q, sampleRate );
 
@@ -721,45 +424,7 @@ void setPhase( int idx )
       b[2] *= -1.0;
     }
 
-    uint16_t addr = paramPhase[idx].addr;
-    floatval = convertTo824(b[2]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B2
-    addr++;
-
-    floatval = convertTo824(b[1]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B1
-    addr++;
-
-    floatval = convertTo824(b[0]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // B0
-    addr++;
-
-    floatval = convertTo824(a[2]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A2
-    addr++;
-
-    floatval = convertTo824(a[1]);
-    val[0] = (floatval >> 24 ) & 0xFF;
-    val[1] = (floatval >> 16 ) & 0xFF;
-    val[2] = (floatval >> 8 ) & 0xFF;
-    val[3] =  floatval & 0xFF;
-    ADAU1452_WRITE_BLOCK( addr, val, 4 );  // A1
+    writeBiquad( paramPhase[idx].addr, a, b );
   }
 }
 

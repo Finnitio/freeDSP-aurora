@@ -930,9 +930,6 @@ void handlePostHpJson( JsonObject root )
   #endif
 
 
-  softMuteDAC();
-
-
   uint32_t idx = static_cast<uint32_t>(root["idx"].as<String>().toInt());
   paramHP[idx].fc = root["fc"].as<String>().toFloat();
   paramHP[idx].typ = static_cast<tFilterType>(root["typ"].as<String>().toInt());
@@ -942,9 +939,6 @@ void handlePostHpJson( JsonObject root )
     paramHP[idx].bypass = true;
 
   setHighPass( idx );
-
-
-  softUnmuteDAC();
 
 }
 
@@ -959,9 +953,6 @@ void handlePostLshelvJson( JsonObject root )
   #endif
 
 
-  softMuteDAC();
-
-
   uint32_t idx = static_cast<uint32_t>(root["idx"].as<String>().toInt());
   paramLshelv[idx].gain = root["gain"].as<String>().toFloat();
   paramLshelv[idx].fc = root["fc"].as<String>().toFloat();
@@ -972,9 +963,6 @@ void handlePostLshelvJson( JsonObject root )
     paramLshelv[idx].bypass = true;
 
   setLowShelving( idx );
-
-
-  softUnmuteDAC();
 }
 
 //==============================================================================
@@ -988,9 +976,6 @@ void handlePostPeqJson( JsonObject root )
   #endif
 
 
-  softMuteDAC();
-
-
   uint32_t idx = static_cast<uint32_t>(root["idx"].as<String>().toInt());
   paramPeq[idx].gain = root["gain"].as<String>().toFloat();
   paramPeq[idx].fc = root["fc"].as<String>().toFloat();
@@ -1001,9 +986,6 @@ void handlePostPeqJson( JsonObject root )
     paramPeq[idx].bypass = true;
 
   setPEQ( idx );
-
-
-  softUnmuteDAC();
 }
 
 //==============================================================================
@@ -1015,9 +997,6 @@ void handlePostPeqbankJson( JsonObject root )
   #if DEBUG_PRINT
   Serial.println(F("POST /peqbank"));
   #endif
-
-
-  softMuteDAC();
 
 
   uint32_t idx = static_cast<uint32_t>(root["idx"].as<String>().toInt());
@@ -1033,9 +1012,6 @@ void handlePostPeqbankJson( JsonObject root )
       paramPeqBank[idx].bypass[nn] = true;
   }
   setPeqBank(idx);
-
-
-  softUnmuteDAC();
 }
 
 //==============================================================================
@@ -1049,9 +1025,6 @@ void handlePostHshelvJson( JsonObject root )
   #endif
 
 
-  softMuteDAC();
-
-
   uint32_t idx = static_cast<uint32_t>(root["idx"].as<String>().toInt());
   paramHshelv[idx].gain = root["gain"].as<String>().toFloat();
   paramHshelv[idx].fc = root["fc"].as<String>().toFloat();
@@ -1062,9 +1035,6 @@ void handlePostHshelvJson( JsonObject root )
     paramHshelv[idx].bypass = true;
 
   setHighShelving( idx );
-
-
-  softUnmuteDAC();
 }
 
 //==============================================================================
@@ -1078,9 +1048,6 @@ void handlePostLpJson( JsonObject root )
   #endif
 
 
-  softMuteDAC();
-
-
   uint32_t idx = static_cast<uint32_t>(root["idx"].as<String>().toInt());
   paramLP[idx].fc = root["fc"].as<String>().toFloat();
   paramLP[idx].typ = static_cast<tFilterType>(root["typ"].as<String>().toInt());
@@ -1090,9 +1057,6 @@ void handlePostLpJson( JsonObject root )
     paramLP[idx].bypass = true;
 
   setLowPass( idx );
-
-
-  softUnmuteDAC();
 }
 
 
@@ -1105,9 +1069,6 @@ void handlePostPhaseJson( JsonObject root )
   #if DEBUG_PRINT
   Serial.println(F("POST /phase"));
   #endif
-
-
-  softMuteDAC();
 
 
   uint32_t idx = static_cast<uint32_t>(root["idx"].as<String>().toInt());
@@ -1124,9 +1085,6 @@ void handlePostPhaseJson( JsonObject root )
     paramPhase[idx].bypass = true;
 
   setPhase( idx );
-
-
-  softUnmuteDAC();
 }
 
 //==============================================================================
@@ -1139,9 +1097,6 @@ void handlePostDelayJson( JsonObject root )
   Serial.println(F("POST /delay"));
   #endif
 
-
-  softMuteDAC();
-
   Serial.println( root["idx"].as<String>() );
   Serial.println( root["delay"].as<String>() );
 
@@ -1153,9 +1108,6 @@ void handlePostDelayJson( JsonObject root )
     paramDelay[idx].bypass = true;
 
   setDelay( idx );
-
-
-  softUnmuteDAC();
 }
 
 //==============================================================================
@@ -1169,9 +1121,6 @@ void handlePostGainJson( JsonObject root )
   #endif
 
 
-  softMuteDAC();
-
-
   uint32_t idx = static_cast<uint32_t>(root["idx"].as<String>().toInt());
   paramGain[idx].gain = root["gain"].as<String>().toFloat();
   if( root["mute"].as<String>().toInt() == 0 )
@@ -1180,9 +1129,6 @@ void handlePostGainJson( JsonObject root )
     paramGain[idx].mute = true;
 
   setGain( idx );
-
-
-  softUnmuteDAC();
 }
 
 //==============================================================================
@@ -1194,9 +1140,6 @@ void handlePostXoJson( JsonObject root )
   #if DEBUG_PRINT
   Serial.println(F("POST /xo"));
   #endif
-
-
-  softMuteDAC();
 
   Serial.println( root["idx"].as<String>() );
   Serial.println( root["lp_fc"].as<String>() );
@@ -1220,9 +1163,6 @@ void handlePostXoJson( JsonObject root )
     paramCrossover[idx].hp_bypass = true;
 
   setCrossover( idx );
-
-
-  softUnmuteDAC();
 }
 
 //==============================================================================
@@ -1234,9 +1174,6 @@ void handlePostFirBypassJson( JsonObject root )
   #if DEBUG_PRINT
   Serial.println(F("POST /firbypass"));
   #endif
-
-
-  softMuteDAC();
 
   Serial.println( root["idx"].as<String>() );
 
@@ -1250,9 +1187,6 @@ void handlePostFirBypassJson( JsonObject root )
     Serial.println("Bypass");
 
   setFir( idx );
-
-
-  softUnmuteDAC();
 }
 
 //==============================================================================
@@ -1338,8 +1272,6 @@ void handlePostStore( JsonObject root )
   #if DEBUG_PRINT
   Serial.println(F("POST /store"));
   #endif
-
-  softMuteDAC();
 
   String fileName = presetUsrparamFile[currentPreset];
 
@@ -1520,9 +1452,6 @@ void handlePostStore( JsonObject root )
   Serial.print(F("Wrote "));
   Serial.print( totalSize );
   Serial.println(F("bytes"));
-
-
-  softUnmuteDAC();
 }
 
 //==============================================================================

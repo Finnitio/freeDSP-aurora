@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "config.h"
+#include "safeload.h"
 
 /**
  * This file contains the shared variables
@@ -184,6 +185,7 @@ extern int numPeqBanks;
 extern float sampleRate;
 
 extern uint16_t addrVPot;
+extern SafeloadCfg safeloadCfg;
 
 extern String currentPlugInName;
 extern String pluginVersion;

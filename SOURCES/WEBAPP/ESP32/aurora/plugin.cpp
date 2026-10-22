@@ -40,6 +40,7 @@ int numPeqBanks = 0;
 float sampleRate = 48000.0;
 
 uint16_t addrVPot = 0x0000;
+SafeloadCfg safeloadCfg = { 0x0000, 0x0000 };
 
 String currentPlugInName;
 String pluginVersion = "0.0.0";
@@ -202,6 +203,8 @@ void readPluginMeta( void )
 
     masterVolume.addr = jsonPluginMeta["master"].as<String>().toInt();
     addrVPot = jsonPluginMeta["vpot"].as<String>().toInt();
+    safeloadCfg.data = jsonPluginMeta["safeload"][0] | 0;  // absent in old plugin.ini: direct writes
+    safeloadCfg.addr = jsonPluginMeta["safeload"][1] | 0;
 
     //--- Read the addresses of the SPDIF output multiplexer
     spdifOutputSelector.addrChnLeft[ADDR_ANALOG] = static_cast<uint16_t>(jsonPluginMeta["spdifout"][ADDR_ANALOG]);
