@@ -6,6 +6,7 @@
 #include "plugin.h"
 #include "adau1452.h"
 #include "addons.h"
+#include "i2cworker.h"
 
 //==============================================================================
 /*! Setup AddOn B
@@ -14,6 +15,7 @@
 void setupAddOnB( void )
 {
   Serial.print( "Init AddOn B......" );
+  I2cLock lock;
   Wire.beginTransmission( ADDONB_SPDIFMUX_ADDR );
   Wire.write( 0x03 );
   Wire.write( 0x00 );
@@ -47,6 +49,7 @@ void setupAddOnB( void )
  */
 void setupAddOnA( void )
 {
+  I2cLock lock;
   Wire.beginTransmission( ADDONA_SPDIFMUX_ADDR );
   Wire.write( 0x03 );
   Wire.write( 0xFF );

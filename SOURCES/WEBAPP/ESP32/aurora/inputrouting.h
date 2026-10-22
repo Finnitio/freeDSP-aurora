@@ -21,7 +21,7 @@ String handleGetInputRoutingJson(void/*AsyncWebServerRequest* request*/);
 /*! Handles the POST request for input routing
  *
  */
-void handlePostInputRoutingJson(AsyncWebServerRequest* request, uint8_t* data);
+void handlePostInputRoutingJson( JsonObject root );
 
 //==============================================================================
 /*! Handles the GET request for virtual input selection
@@ -33,7 +33,7 @@ void handleGetVirtualInputJson(AsyncWebServerRequest* request);
 /*! Handles the POST request for virtual input selection
  *
  */
-void handlePostVirtualInputJson(AsyncWebServerRequest* request, uint8_t* data);
+void handlePostVirtualInputJson( JsonObject root );
 
 //==============================================================================
 /*! Saves the current assignment virtual <-> physical input

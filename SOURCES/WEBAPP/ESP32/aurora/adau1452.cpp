@@ -5,6 +5,7 @@
 #include "AudioFilterFactory.h"
 #include "hwconfig.h"
 #include "adau1452.h"
+#include "i2cworker.h"
 #include "plugin.h"
 
 //==============================================================================
@@ -12,6 +13,7 @@
  */
 void ADAU1452_WRITE_REGISTER( uint16_t reg, byte msb, byte lsb )
 {
+  I2cLock lock;
   Wire.beginTransmission( DSP_ADDR );
   Wire.write( (byte)( (reg >> 8) & 0xFF ) );
   Wire.write( (byte)(  reg       & 0xFF ) );
@@ -25,6 +27,7 @@ void ADAU1452_WRITE_REGISTER( uint16_t reg, byte msb, byte lsb )
  */
 void ADAU1452_WRITE_BLOCK( uint16_t regaddr, byte val[], uint16_t len )
 {
+  I2cLock lock;
   for( uint16_t ii = 0; ii < len; ii = ii + 4 )
   {
     Wire.beginTransmission( DSP_ADDR );

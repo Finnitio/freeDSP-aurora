@@ -29,6 +29,7 @@
 #include "channelnames.h"
 #include "inputrouting.h"
 #include "staretry.h"
+#include "i2cworker.h"
 
 /**
  * These are required for the espmake32 automatic library resolver
@@ -372,8 +373,9 @@ void setup()
   //----------------------------------------------------------------------------
   //--- Configure I2C
   //----------------------------------------------------------------------------
+  i2cInit();
   Wire.begin( I2C_SDA_PIN, I2C_SCL_PIN );
-  Wire.setClock( 100000 );
+  Wire.setClock( 400000 );
   delay( 100 );
 
   //----------------------------------------------------------------------------
@@ -663,7 +665,7 @@ void loop()
   {
     if(editMode == 0)
     {
-      increase_volume();
+      i2cPost( []() { increase_volume(); needUpdateUI = true; } );
       lastREval = rotaryEncoder.getRotationValue();
       needUpdateUI = true;
     }
@@ -671,7 +673,7 @@ void loop()
     {
       myDisplay.drawSwitchingPreset();
 
-      next_preset();
+      i2cPost( []() { next_preset(); needUpdateUI = true; } );
 
       lastREval = rotaryEncoder.getRotationValue();
       needUpdateUI = true;
@@ -680,10 +682,13 @@ void loop()
     {
       if(currentPlugInName == String(F("stereoforever")))
       {
-        incrementVirtualInput();
-        softMuteDAC();
-        updateUI();
-        softUnmuteDAC();
+        i2cPost( []() {
+          incrementVirtualInput();
+          softMuteDAC();
+          updateUI();
+          softUnmuteDAC();
+          needUpdateUI = true;
+        } );
         lastREval = rotaryEncoder.getRotationValue();
         needUpdateUI = true;
       }
@@ -693,7 +698,7 @@ void loop()
   {
     if( editMode == 0 )
     {
-      decrease_volume();
+      i2cPost( []() { decrease_volume(); needUpdateUI = true; } );
       lastREval = rotaryEncoder.getRotationValue();
       needUpdateUI = true;
     }
@@ -701,7 +706,7 @@ void loop()
     {
       myDisplay.drawSwitchingPreset();
 
-      prev_preset();
+      i2cPost( []() { prev_preset(); needUpdateUI = true; } );
 
       lastREval = rotaryEncoder.getRotationValue();
       needUpdateUI = true;
@@ -710,10 +715,13 @@ void loop()
     {
       if(currentPlugInName == String(F("stereoforever")))
       {
-        decrementVirtualInput();
-        softMuteDAC();
-        updateUI();
-        softUnmuteDAC();
+        i2cPost( []() {
+          decrementVirtualInput();
+          softMuteDAC();
+          updateUI();
+          softUnmuteDAC();
+          needUpdateUI = true;
+        } );
         lastREval = rotaryEncoder.getRotationValue();
         needUpdateUI = true;
       }
@@ -729,33 +737,26 @@ void loop()
     uint32_t irval = (irResults.value & 0x0000ff00) >> 8;
     if((irval == APPLE_A_REMOTE_UP) || (irval == APPLE_B_REMOTE_UP))
     {
-      increase_volume();
-      needUpdateUI = true;
+      i2cPost( []() { increase_volume(); needUpdateUI = true; } );
     }
     else if((irval == APPLE_A_REMOTE_DOWN) || (irval == APPLE_B_REMOTE_DOWN))
     {
-      decrease_volume();
-      needUpdateUI = true;
+      i2cPost( []() { decrease_volume(); needUpdateUI = true; } );
     }
     if(currentPlugInName == String(F("stereoforever")) || currentPlugInName == String(F("The Room")))
     {
       if((irval == APPLE_A_REMOTE_LEFT) || (irval == APPLE_B_REMOTE_LEFT))
       {
-        decrementVirtualInput();
-        setVirtualInput();
-        needUpdateUI = true;
+        i2cPost( []() { decrementVirtualInput(); setVirtualInput(); needUpdateUI = true; } );
       }
       else if((irval == APPLE_A_REMOTE_RIGHT) || (irval == APPLE_B_REMOTE_RIGHT))
       {
-        incrementVirtualInput();
-        setVirtualInput();
-        needUpdateUI = true;
+        i2cPost( []() { incrementVirtualInput(); setVirtualInput(); needUpdateUI = true; } );
       }
       else if((irval == APPLE_A_REMOTE_MENU) || (irval == APPLE_B_REMOTE_MENU))
       {
         myDisplay.drawSwitchingPreset();
-        next_preset();
-        needUpdateUI = true;
+        i2cPost( []() { next_preset(); needUpdateUI = true; } );
       }
     }
     else
@@ -763,14 +764,12 @@ void loop()
       if((irval == APPLE_A_REMOTE_LEFT) || (irval == APPLE_B_REMOTE_LEFT))
       {
         myDisplay.drawSwitchingPreset();
-        prev_preset();
-        needUpdateUI = true;
+        i2cPost( []() { prev_preset(); needUpdateUI = true; } );
       }
       else if((irval == APPLE_A_REMOTE_RIGHT) || (irval == APPLE_B_REMOTE_RIGHT))
       {
         myDisplay.drawSwitchingPreset();
-        next_preset();
-        needUpdateUI = true;
+        i2cPost( []() { next_preset(); needUpdateUI = true; } );
       }
     }
     //else

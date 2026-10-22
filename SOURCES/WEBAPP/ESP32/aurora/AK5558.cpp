@@ -4,12 +4,14 @@
 #include "plugin.h"
 #include "hwconfig.h"
 #include "AK5558.h"
+#include "i2cworker.h"
 
 //==============================================================================
 /*!
  */
 void AK5558_REGWRITE( byte reg, byte val)
 {
+  I2cLock lock;
   Wire.beginTransmission( AK5558_I2C_ADDR );
   Wire.write( reg );
   Wire.write( val );

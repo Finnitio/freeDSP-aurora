@@ -11,6 +11,7 @@
 #include "adau1452.h"
 #include "AK4458.h"
 #include "display.h"
+#include "i2cworker.h"
 
 #include "inputrouting.h"
 
@@ -173,7 +174,7 @@ String handleGetInputRoutingJson(void)
 /*! Handles the POST request for input routing
  *
  */
-void handlePostInputRoutingJson(AsyncWebServerRequest* request, uint8_t* data)
+void handlePostInputRoutingJson( JsonObject root )
 {
   #if DEBUG_PRINT
   Serial.println( "POST /inputrouting" );
@@ -181,19 +182,7 @@ void handlePostInputRoutingJson(AsyncWebServerRequest* request, uint8_t* data)
 
   softMuteDAC();
 
-  //DynamicJsonDocument jsonDoc(1024);
-  DeserializationError err = deserializeJson(jsonDoc, (const char*)data);
-  if(err)
-  {
-    #if DEBUG_PRINT || ERROR_PRINT 
-    Serial.print(F("[ERROR] handlePostInputRoutingJson(): Deserialization failed."));
-    Serial.println(err.c_str());
-    #endif
-    request->send(400, "text/plain", err.c_str());
-    return;
-  }
 
-  JsonObject root = jsonDoc.as<JsonObject>();
 
   for(int mm = 0; mm < kNumSourceNames; mm++)
   {
@@ -208,7 +197,6 @@ void handlePostInputRoutingJson(AsyncWebServerRequest* request, uint8_t* data)
   writeVirtualInputRouting();
   setVirtualInput();
 
-  request->send(200, "text/plain", "");
   needUpdateUI = true;
   softUnmuteDAC();
 }
@@ -236,29 +224,16 @@ void handleGetVirtualInputJson(AsyncWebServerRequest* request)
 /*! Handles the POST request for virtual input selection
  *
  */
-void handlePostVirtualInputJson(AsyncWebServerRequest* request, uint8_t* data)
+void handlePostVirtualInputJson( JsonObject root )
 {
   #if DEBUG_PRINT
   Serial.println( "POST /vinput" );
   #endif
 
-  //DynamicJsonDocument jsonDoc(1024);
-  DeserializationError err = deserializeJson( jsonDoc, (const char*)data );
-  if( err )
-  {
-    #if DEBUG_PRINT || ERROR_PRINT 
-    Serial.print( "[ERROR] handlePostHpJson(): Deserialization failed. " );
-    Serial.println( err.c_str() );
-    #endif
-    request->send( 400, "text/plain", err.c_str() );
-    return;
-  }
 
   softMuteDAC();
-  JsonObject root = jsonDoc.as<JsonObject>();
   currentVirtualInput = (uint32_t)strtoul(root["sel"].as<String>().c_str(), NULL, 10);
   setVirtualInput(); 
-  request->send(200, "text/plain", "");
   needUpdateUI = true;
   softUnmuteDAC();
 }
@@ -361,6 +336,7 @@ void setVirtualInput(void)
       setInput(idx);
       if((paramInputs[idx].sel & 0xffff0000) == 0x00040000)
       {
+        I2cLock lock;
         Wire.beginTransmission(ADDONB_SPDIFMUX_ADDR);
         Wire.write(0x01);
         if(sourceRouting[currentVirtualInput][nn] == 18) // SPDIF Coax 1 Left

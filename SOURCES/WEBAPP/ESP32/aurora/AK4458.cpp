@@ -4,12 +4,14 @@
 #include "plugin.h"
 #include "hwconfig.h"
 #include "AK4458.h"
+#include "i2cworker.h"
 
 //==============================================================================
 /*!
  */
 void AK4458_REGWRITE( byte reg, byte val )
 {
+  I2cLock lock;
   Wire.beginTransmission( AK4458_I2C_ADDR );
   Wire.write( reg );
   Wire.write( val );
