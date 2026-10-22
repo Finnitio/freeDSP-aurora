@@ -95,6 +95,12 @@ def test_matrix_keeps_existing_addresses(matrix):
     assert len(ini['spdifout']) == 14
 
 
+def test_matrix_safeload_addresses(matrix):
+    # data_SafeLoad (first of 5 words), address_SafeLoad
+    _, ini = matrix
+    assert ini['safeload'] == [15396, 15401]
+
+
 def test_matrix_has_no_generated_dsp_html(matrix):
     plugin_dir, _ = matrix
     assert not (plugin_dir / 'dsp.html').exists()

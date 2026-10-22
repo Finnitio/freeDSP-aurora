@@ -252,6 +252,16 @@ def intaddr(node):
     return int(node.find('Address').text)
 
 
+# Software safeload module: [data_SafeLoad (first of 5 words), address_SafeLoad]
+safeload = [0, 0]
+for reg in root.findall('IC/Register'):
+    regname = reg.find('Name').text
+    if regname == '__SafeLoad_Module__data_SafeLoad':
+        safeload[0] = intaddr(reg)
+    elif regname == '__SafeLoad_Module__address_SafeLoad':
+        safeload[1] = intaddr(reg)
+
+
 for module in root.findall('IC/Module'):
     cellname = module.find('CellName')
 
@@ -740,6 +750,7 @@ data = {
     "firlen": firlen_t,
     "vpot": vpot,
     "master": mastervol,
+    "safeload": safeload,
     "version": version,
 }
 
