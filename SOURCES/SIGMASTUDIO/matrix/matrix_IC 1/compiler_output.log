@@ -1,19 +1,19 @@
 ADAU145X Assembler, Analog Devices Inc.
 Version: 4.7.0,1827  (built 4/5/2022)
 
-##### Compile Started: Thursday, October 22, 2026 2:05:30 PM #####
+##### Compile Started: Thursday, October 22, 2026 2:23:06 PM #####
 ADAU145X Assembler, Analog Devices Inc.
 Version: 4.7.0,1827  (built 4/5/2022)
 
-##### Compile Started: Thursday, October 22, 2026 2:05:30 PM #####
+##### Compile Started: Thursday, October 22, 2026 2:23:06 PM #####
 ##### Compile succeeded:  0 errors, 0 warnings #####
 
 ##### Summary #####
-DM0 RAM used:       17084    (of 20480)
-DM1 RAM used:       01342    (of 20480)
+DM0 RAM used:       17184    (of 20480)
+DM1 RAM used:       01422    (of 20480)
 PM  RAM used(Data): 00000    (of 8192)
-PM  RAM used(Inst): 01375    (of 8192) 949 instructions (32bit: 523  64bit: 426)
-Total PM used:      01375    (of 8192)
+PM  RAM used(Inst): 01363    (of 8192) 941 instructions (32bit: 519  64bit: 422)
+Total PM used:      01363    (of 8192)
 
 --------------------------------------------------------------------------------------
 STREAM                        Inst      Inst      DM0     DM1     PM
@@ -23,34 +23,34 @@ STACK                          -         -        16      0       0
 VolumePot                     26        45        0       10      0
 MasterVolume                  25        44        3       8       0
 FRAMEWORK                     58        39        19      0       0
-BusChain2_2                   28        28        50      46      0
-BusChain1_2                   28        28        50      46      0
-BusChain1_1                   28        28        50      45      0
-BusChain2_1                   28        28        50      45      0
 OutChain1_2                   38        26        75      66      0
+OutChain2_2                   38        26        75      66      0
 OutChain3_2                   38        26        75      66      0
 OutChain8_2                   38        26        75      66      0
 OutChain7_2                   38        26        75      66      0
 OutChain6_2                   38        26        75      66      0
 OutChain5_2                   38        26        75      66      0
 OutChain4_2                   38        26        75      66      0
-OutChain2_2                   38        26        75      66      0
 OutChain3_1                   38        26        75      65      0
-OutChain2_1                   38        25        75      65      0
+BusChain2_2                   38        25        75      66      0
+BusChain1_2                   38        25        75      66      0
 OutChain1_1                   38        25        75      65      0
-OutChain4_1                   38        25        75      65      0
-OutChain7_1                   38        25        75      65      0
 OutChain8_1                   38        25        75      65      0
-OutChain5_1                   38        25        75      65      0
+OutChain7_1                   38        25        75      65      0
 OutChain6_1                   38        25        75      65      0
-Nx1-1_UAC                     14        18        18      2       0
+BusChain1_1                   38        25        75      65      0
+BusChain2_1                   38        25        75      65      0
+OutChain2_1                   38        25        75      65      0
+OutChain4_1                   38        25        75      65      0
+OutChain5_1                   38        25        75      65      0
 Nx1-1_Exp                     14        18        18      2       0
 Nx1-1_ESP32                   14        18        18      2       0
 Nx1-1_Analog                  14        18        18      2       0
+Nx1-1_UAC                     14        18        18      2       0
 Nx1-1_Mux                     14        18        12      2       0
-Input ADC                     16        16        0       8       0
-Input UAC2                    16        16        0       8       0
 Input ESP32                   16        16        0       8       0
+Input UAC2                    16        16        0       8       0
+Input ADC                     16        16        0       8       0
 Input Expansion               16        16        0       8       0
 OutGain8                      8         11        3       1       0
 OutGain7                      8         11        3       1       0
@@ -127,7 +127,7 @@ Output_UAC1                   2         2         0       0       0
 Output_UAC6                   2         2         0       0       0
 Output_UAC2                   2         2         0       0       0
 --------------------------------------------------------------------------------------
-Total                         1362      1321      17080   1338    0
+Total                         1402      1309      17180   1418    0
 --------------------------------------------------------------------------------------
-(% Fs=48.0kHz)                23%       17%       84%     7%      0%
+(% Fs=48.0kHz)                23%       16%       84%     7%      0%
 

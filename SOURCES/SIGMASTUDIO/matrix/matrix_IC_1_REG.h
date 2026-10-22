@@ -1,7 +1,7 @@
 /*
  * File:           C:\Users\finnb\OneDrive\Punktschall\01 Projekte\09 DSP\freeDSP-aurora\SOURCES\SIGMASTUDIO\matrix\matrix_IC_1_REG.h
  *
- * Created:        Thursday, October 22, 2026 2:05:35 PM
+ * Created:        Thursday, October 22, 2026 2:23:10 PM
  * Description:    matrix:IC 1 control register definitions.
  *
  * This software is distributed in the hope that it will be useful,

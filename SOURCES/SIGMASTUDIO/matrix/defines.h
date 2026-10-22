@@ -1,7 +1,7 @@
 /*
  * File:           defines.h
  *
- * Created:        Thursday, October 22, 2026 2:05:35 PM
+ * Created:        Thursday, October 22, 2026 2:23:10 PM
  * Description:    matrix IC default download data definitions.
  *
  * This software is distributed in the hope that it will be useful,
@@ -19,7 +19,7 @@
 #ifndef __DEFINES_H__
 #define __DEFINES_H__
 
-#define BufferSize_IC_1     	74094
+#define BufferSize_IC_1     	74446
 #define NumTransactions_IC_1	60
 
 
