@@ -40,6 +40,10 @@ public:
    *  Returns "" on success, else the rejection reason; a rejected patch changes nothing. */
   std::string apply( JsonObject patch, uint32_t nowMs );
 
+  /*! Reverts the last accepted apply() (model only, not the DSP writes), e.g. when
+   *  the writes could not be queued. A second call does nothing. */
+  void undo( void );
+
   /*! Full state for the web page (Channels plus the selectable lists). */
   std::string stateJson( void ) const;
 
@@ -78,6 +82,16 @@ private:
   Channel out_[MATRIX_MAX_OUT];
   bool dirty_;
   uint32_t lastChange_;
+
+  struct Undo
+  {
+    bool valid;
+    bool isBus;
+    int idx;
+    Channel ch;
+    bool dirty;
+    uint32_t lastChange;
+  } undo_;
 };
 
 #endif

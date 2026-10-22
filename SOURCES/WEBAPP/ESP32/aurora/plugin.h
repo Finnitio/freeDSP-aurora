@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include "config.h"
 #include "safeload.h"
+#include "matrixmodel.h"
 
 /**
  * This file contains the shared variables
@@ -158,13 +159,13 @@ struct tMatrixMeta
   int nout;
   int nbiquad;
   int maxdly;  //!< max Output delay in samples
-  uint16_t busbiquad[MAX_MATRIX_BUS * MAX_MATRIX_BIQUAD];
-  uint16_t outbiquad[MAX_MATRIX_OUT * MAX_MATRIX_BIQUAD];
-  uint16_t busgain[MAX_MATRIX_BUS];
-  uint16_t outgain[MAX_MATRIX_OUT];
-  uint16_t outpol[MAX_MATRIX_OUT];
-  uint16_t outdly[MAX_MATRIX_OUT];
-  uint16_t outroute[MAX_MATRIX_OUT];
+  uint16_t busbiquad[MATRIX_MAX_BUS * MAX_MATRIX_BIQUAD];
+  uint16_t outbiquad[MATRIX_MAX_OUT * MAX_MATRIX_BIQUAD];
+  uint16_t busgain[MATRIX_MAX_BUS];
+  uint16_t outgain[MATRIX_MAX_OUT];
+  uint16_t outpol[MATRIX_MAX_OUT];
+  uint16_t outdly[MATRIX_MAX_OUT];
+  uint16_t outroute[MATRIX_MAX_OUT];
 };
 
 extern tSettings Settings;

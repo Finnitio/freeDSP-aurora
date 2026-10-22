@@ -246,8 +246,25 @@ static void saveIsDueTwoSecondsAfterTheLastChange()
   assert(!m.saveDue(99999));
 }
 
+static void undoRestoresTheLastAcceptedPatch()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  patch(m, "{\"ch\":\"out\",\"idx\":1,\"name\":\"Keep\"}", 1000);
+  m.markSaved();
+  const std::string before = m.savePreset();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"mute\":false,\"route\":0,\"name\":\"X\"}", 5000).empty());
+  assert(m.dirty());
+  m.undo();
+  assert(m.savePreset() == before);
+  assert(!m.dirty());  // dirty flag restored too
+  m.undo();            // second undo is a no-op
+  assert(m.savePreset() == before);
+}
+
 int main()
 {
+  undoRestoresTheLastAcceptedPatch();
   freshDefaults();
   applyAllEmitsFullWriteSet();
   muteAndGainWrites();

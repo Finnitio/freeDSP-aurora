@@ -10,13 +10,13 @@ R"!^!(
 <style>
 body{padding:0 8px;max-width:640px;margin:0 auto}
 h2{margin:14px 0 6px}
-.row{display:flex;align-items:center;gap:6px;margin:4px 0}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:6px 0}
 .row *{box-sizing:border-box}
-.name{flex:1 1 90px;min-width:0;width:90px}
+.name{flex:1 1 80px;min-width:0;width:80px}
 input.name{height:30px}
-select{flex:1 1 90px;min-width:0;height:30px;border:1px solid #808080;border-radius:2px;color:#fff}
-.gain{flex:2 1 110px;min-width:0}
-.gv{width:52px;text-align:right}
+select{flex:1 1 80px;min-width:0;width:80px;height:30px;border:1px solid #808080;border-radius:2px;color:#fff}
+.gain{flex:2 1 100px;min-width:0}
+.gv{flex:0 0 64px;text-align:right}
 button.mute{width:56px;height:30px;border-top-width:1px}
 button.on{background-color:#802020}
 #msg{color:#e08080;min-height:18px}
@@ -32,12 +32,13 @@ button.on{background-color:#802020}
 <h2>Outputs</h2>
 <div id="outs"></div>
 <script>
-var st=null,timers={};
+var st=null,timers={},seq=0,seen=0,late=false;
 function say(t){document.getElementById("msg").textContent=t||"";}
 function waitIdle(){return fetch("/idle").then(function(r){return r.text();}).then(function(t){
   if(t=="1")return;return new Promise(function(r){setTimeout(r,100);}).then(waitIdle);});}
 function load(){
-  fetch("/matrix").then(function(r){return r.json();}).then(function(s){st=s;draw();})
+  var n=++seq;
+  fetch("/matrix").then(function(r){return r.json();}).then(function(s){if(n<seen)return;seen=n;st=s;draw();})
    .catch(function(){say("Cannot read the matrix");});
   fetch("/preset").then(function(r){return r.json();}).then(function(p){drawPresets(p.pre);});
 }
@@ -53,14 +54,15 @@ function preset(p){
 // Sends a patch, the reply is the new state or the reason it was refused.
 function send(ch,idx,f){
   var p={ch:ch,idx:idx};for(var k in f)p[k]=f[k];
+  var n=++seq;  // replies older than one already shown are ignored
   return fetch("/matrix",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)})
    .then(function(r){return r.text().then(function(t){
-     if(r.ok){st=JSON.parse(t);say("");}else{say(t);}
+     if(r.ok){if(n<seen)return;seen=n;st=JSON.parse(t);say("");}else{say(t);}
      draw();});});
 }
 // Sliders are sent while dragging, at most every 100 ms.
 function sendGain(ch,idx,v){
-  document.getElementById("gv"+ch+idx).textContent=v;
+  document.getElementById("gv"+ch+idx).textContent=v+" dB";
   var k=ch+idx;if(timers[k])return;
   timers[k]=setTimeout(function(){timers[k]=0;},100);
   send(ch,idx,{gain:parseFloat(v)});
@@ -74,7 +76,7 @@ function row(ch,idx,c,sel){
    +sel
    +"<button class='mute"+(c.mute?" on":"")+"' onclick=\"send('"+ch+"',"+idx+",{mute:"+!c.mute+"})\">"+(c.mute?"Muted":"Mute")+"</button>"
    +"<input type='range' class='gain' min='"+st.gainmin+"' max='"+st.gainmax+"' step='0.5' value='"+c.gain+"' oninput=\"sendGain('"+ch+"',"+idx+",this.value)\" onchange=\"send('"+ch+"',"+idx+",{gain:parseFloat(this.value)})\">"
-   +"<span class='gv' id='gv"+ch+idx+"'>"+c.gain+"</span></div>";
+   +"<span class='gv' id='gv"+ch+idx+"'>"+c.gain+" dB</span></div>";
 }
 function draw(){
   if(!st)return;
@@ -86,10 +88,13 @@ function draw(){
     o+=row("out",i,c,"<select onchange=\"send('out',"+i+",{route:parseInt(this.value)})\">"+opts(st.routes,c.route,function(s,j){return j;},function(s){return s;})+"</select>");
   });
   var a=document.activeElement;
-  if(a&&a.type=="range")return;  // do not rebuild under a slider being dragged
+  // do not rebuild under an open select, a name being typed or a slider being dragged
+  if(a&&(a.tagName=="SELECT"||a.tagName=="INPUT")&&a.closest("#buses,#outs")){late=true;return;}
+  late=false;
   document.getElementById("buses").innerHTML=b;
   document.getElementById("outs").innerHTML=o;
 }
+document.addEventListener("focusout",function(){if(late)setTimeout(draw,0);});
 </script>
 </body>
 </html>

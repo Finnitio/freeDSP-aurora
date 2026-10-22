@@ -208,8 +208,8 @@ void readPluginMeta( void )
     pluginKind = String( jsonPluginMeta["kind"] | "" );
     if( pluginKind == "matrix" )
     {
-      matrixMeta.nbus = min( (int)( jsonPluginMeta["nbus"] | 0 ), MAX_MATRIX_BUS );
-      matrixMeta.nout = min( (int)( jsonPluginMeta["nout"] | 0 ), MAX_MATRIX_OUT );
+      matrixMeta.nbus = min( (int)( jsonPluginMeta["nbus"] | 0 ), MATRIX_MAX_BUS );
+      matrixMeta.nout = min( (int)( jsonPluginMeta["nout"] | 0 ), MATRIX_MAX_OUT );
       matrixMeta.nbiquad = min( (int)( jsonPluginMeta["nbiquad"] | 0 ), MAX_MATRIX_BIQUAD );
       matrixMeta.maxdly = jsonPluginMeta["maxdly"] | 0;
       for( int ii = 0; ii < matrixMeta.nbus * matrixMeta.nbiquad; ii++ )

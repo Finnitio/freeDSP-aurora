@@ -46,6 +46,7 @@ MatrixModel::MatrixModel( MatrixPort& port, int nbus, int nout )
   : port_( port ), nbus_( nbus < MATRIX_MAX_BUS ? nbus : MATRIX_MAX_BUS ),
     nout_( nout < MATRIX_MAX_OUT ? nout : MATRIX_MAX_OUT ), dirty_( false ), lastChange_( 0 )
 {
+  undo_.valid = false;
   reset();
 }
 
@@ -74,6 +75,7 @@ void MatrixModel::reset( void )
 void MatrixModel::loadDefaults( void )
 {
   reset();
+  undo_.valid = false;
   dirty_ = false;
   applyAll();
 }
@@ -147,6 +149,12 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
       return std::string( "unknown field " ) + key;
   }
 
+  undo_.valid = true;
+  undo_.isBus = isBus;
+  undo_.idx = idx;
+  undo_.ch = prev;
+  undo_.dirty = dirty_;
+  undo_.lastChange = lastChange_;
   (isBus ? bus_[idx] : out_[idx]) = next;
   const MatrixChannelKind ck = isBus ? MATRIX_BUS : MATRIX_OUT;
   const double lin = linear( next );
@@ -175,6 +183,16 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
     lastChange_ = nowMs;
   }
   return "";
+}
+
+void MatrixModel::undo( void )
+{
+  if( !undo_.valid )
+    return;
+  (undo_.isBus ? bus_[undo_.idx] : out_[undo_.idx]) = undo_.ch;
+  dirty_ = undo_.dirty;
+  lastChange_ = undo_.lastChange;
+  undo_.valid = false;
 }
 
 //==============================================================================
@@ -306,6 +324,7 @@ std::string MatrixModel::loadPreset( const std::string& json )
   }
   for( int b = 0; b < nbus_; b++ ) bus_[b] = nb[b];
   for( int o = 0; o < nout_; o++ ) out_[o] = no[o];
+  undo_.valid = false;
   dirty_ = false;
   applyAll();
   return "";

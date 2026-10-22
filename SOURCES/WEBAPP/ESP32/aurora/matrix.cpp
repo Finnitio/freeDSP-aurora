@@ -10,12 +10,15 @@
 
 namespace
 {
+enum OpType { OP_GAIN, OP_ROUTE, OP_SOURCE };
+
 struct Op
 {
-  char type;  // 'g' gain, 'r' route, 's' source
+  OpType type;
   MatrixChannelKind kind;
   int idx;
-  double val;
+  double gain;   // OP_GAIN: linear
+  uint32_t sel;  // OP_ROUTE: route, OP_SOURCE: source code
 };
 
 /*! Collects the model's writes; they are executed after the model call. */
@@ -23,9 +26,9 @@ class RecordPort : public MatrixPort
 {
 public:
   std::vector<Op> ops;
-  void writeGain( MatrixChannelKind kind, int idx, double linear ) override { ops.push_back( { 'g', kind, idx, linear } ); }
-  void writeRoute( int out, int route ) override { ops.push_back( { 'r', MATRIX_OUT, out, (double)route } ); }
-  void writeSource( int bus, uint32_t sel ) override { ops.push_back( { 's', MATRIX_BUS, bus, (double)sel } ); }
+  void writeGain( MatrixChannelKind kind, int idx, double linear ) override { ops.push_back( { OP_GAIN, kind, idx, linear, 0 } ); }
+  void writeRoute( int out, int route ) override { ops.push_back( { OP_ROUTE, MATRIX_OUT, out, 0.0, (uint32_t)route } ); }
+  void writeSource( int bus, uint32_t sel ) override { ops.push_back( { OP_SOURCE, MATRIX_BUS, bus, 0.0, sel } ); }
 };
 
 RecordPort port;
@@ -51,13 +54,13 @@ void execOps( const std::vector<Op>& ops )
   for( size_t ii = 0; ii < ops.size(); ii++ )
   {
     const Op& op = ops[ii];
-    if( op.type == 'g' )
-      writeWord( op.kind == MATRIX_BUS ? matrixMeta.busgain[op.idx] : matrixMeta.outgain[op.idx], convertTo824( op.val ) );
-    else if( op.type == 'r' )
-      writeWord( matrixMeta.outroute[op.idx], (uint32_t)op.val );
+    if( op.type == OP_GAIN )
+      writeWord( op.kind == MATRIX_BUS ? matrixMeta.busgain[op.idx] : matrixMeta.outgain[op.idx], convertTo824( op.gain ) );
+    else if( op.type == OP_ROUTE )
+      writeWord( matrixMeta.outroute[op.idx], op.sel );
     else
     {
-      paramInputs[op.idx].sel = (uint32_t)op.val;
+      paramInputs[op.idx].sel = op.sel;
       setInput( op.idx );
     }
   }
@@ -109,10 +112,13 @@ void matrixLoadPreset( void )
   }
 
   std::vector<Op> ops;
+  std::string oldJson;  // changes of the previous preset that auto-save has not stored yet
+  uint8_t oldPreset;
   {
     ModelLock lock;
-    if( model->dirty() )  // changes of the previous preset that auto-save has not stored yet
-      writePresetFile( loadedPreset, model->savePreset() );
+    oldPreset = loadedPreset;
+    if( model->dirty() )
+      oldJson = model->savePreset();
     port.ops.clear();
     std::string err = json.empty() ? "no preset file" : model->loadPreset( json );
     if( !err.empty() )
@@ -124,6 +130,8 @@ void matrixLoadPreset( void )
     loadedPreset = currentPreset;
     ops.swap( port.ops );
   }
+  if( !oldJson.empty() )
+    writePresetFile( oldPreset, oldJson );
   execOps( ops );
 }
 
@@ -134,22 +142,22 @@ bool matrixApply( JsonObject patch, std::string& reply )
     reply = "not a matrix plugin";
     return false;
   }
+  // i2cPost() does not block, so the post stays under the lock: a refused post is undone
+  // before anyone else sees the model, and posts keep the order of the model changes.
+  ModelLock lock;
+  port.ops.clear();
+  reply = model->apply( patch, millis() );
+  if( !reply.empty() )
+    return false;
   std::vector<Op> ops;
-  {
-    ModelLock lock;
-    port.ops.clear();
-    reply = model->apply( patch, millis() );
-    ops.swap( port.ops );
-    if( reply.empty() )
-      reply = model->stateJson();
-    else
-      return false;
-  }
+  ops.swap( port.ops );
   if( !ops.empty() && !i2cPost( [ops]() { execOps( ops ); } ) )
   {
+    model->undo();
     reply = "busy";
     return false;
   }
+  reply = model->stateJson();
   return true;
 }
 
@@ -165,15 +173,12 @@ void matrixLoop( void )
 {
   if( !model )
     return;
-  std::string json;
-  uint8_t preset;
-  {
-    ModelLock lock;
-    if( !model->saveDue( millis() ) )
-      return;
-    json = model->savePreset();
-    preset = loadedPreset;
+  ModelLock lock;
+  if( !model->saveDue( millis() ) )
+    return;
+  std::string json = model->savePreset();
+  uint8_t preset = loadedPreset;
+  // only a queued save counts as saved; otherwise it is retried on the next call
+  if( i2cPost( [json, preset]() { writePresetFile( preset, json ); } ) )
     model->markSaved();
-  }
-  i2cPost( [json, preset]() { writePresetFile( preset, json ); } );
 }
