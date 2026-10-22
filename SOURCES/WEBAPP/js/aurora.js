@@ -137,6 +137,14 @@ function onLoad(){
   });
 }
 
+// POSTs are answered before the device has applied them; wait until it has
+function waitIdle(){
+  return fetch("/idle").then(function(r){return r.text();}).then(function(t){
+    if(t=="1") return;
+    return new Promise(function(res){setTimeout(res,100);}).then(waitIdle);
+  });
+}
+
 function switchPreset(p){
   var data={};
   data.pre=p;
@@ -145,7 +153,8 @@ function switchPreset(p){
   fetch("/preset",{method:"POST",headers:{
   "Content-Type": "application/json"},
   body:JSON.stringify(data)
-  }).then(function(response){return fetch("/addoncfg");
+  }).then(function(response){return waitIdle();
+  }).then(function(){return fetch("/addoncfg");
   }).then(function(response){return response.json();
   }).then(function(cfg){
     if(document.getElementById("aid").value==2){

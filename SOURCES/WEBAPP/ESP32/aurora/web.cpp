@@ -1877,7 +1877,8 @@ void setupWebserver (void)
   server.on( "/allinputs",    HTTP_GET, [](AsyncWebServerRequest *request ) { handleGetAllInputsJson(request); });
   server.on( "/addoncfg",     HTTP_GET, [](AsyncWebServerRequest *request ) { handleGetAddonConfigJson(request); });
   server.on( "/fir",          HTTP_GET, [](AsyncWebServerRequest *request ) { handleGetFirJson(request); });
-  server.on( "/allbyp",       HTTP_GET, [](AsyncWebServerRequest *request ) { request->send(200, "text/plain", handleGetAllBypJson()); });
+  server.on( "/idle",         HTTP_GET, [](AsyncWebServerRequest *request ) { request->send(200, "text/plain", i2cIdle() ? "1" : "0"); });
+  server.on( "/allbyp",      HTTP_GET, [](AsyncWebServerRequest *request ) { request->send(200, "text/plain", handleGetAllBypJson()); });
   server.on( "/allfc",        HTTP_GET, [](AsyncWebServerRequest *request ) { request->send(200, "text/plain", handleGetAllFcJson()); });
   server.on( "/allnames",     HTTP_GET, [](AsyncWebServerRequest *request ) { request->send(200, "text/plain", handleGetAllNamesJson()); });
   server.on( "/preset.param", HTTP_GET, [](AsyncWebServerRequest *request )

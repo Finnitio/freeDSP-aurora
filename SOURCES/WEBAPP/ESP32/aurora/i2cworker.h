@@ -15,6 +15,10 @@ void i2cInit( void );
 /*! Queues a job for the worker. Returns false if the queue is full (job dropped). */
 bool i2cPost( std::function<void()> job );
 
+/*! True when no job is queued or running. The web UI polls this (GET /idle)
+ *  after a POST before it reads state back, since POSTs are answered at once. */
+bool i2cIdle( void );
+
 void i2cLock( void );
 void i2cUnlock( void );
 
