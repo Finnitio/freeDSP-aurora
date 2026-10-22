@@ -1,0 +1,133 @@
+ADAU145X Assembler, Analog Devices Inc.
+Version: 4.7.0,1827  (built 4/5/2022)
+
+##### Compile Started: Thursday, October 22, 2026 2:05:30 PM #####
+ADAU145X Assembler, Analog Devices Inc.
+Version: 4.7.0,1827  (built 4/5/2022)
+
+##### Compile Started: Thursday, October 22, 2026 2:05:30 PM #####
+##### Compile succeeded:  0 errors, 0 warnings #####
+
+##### Summary #####
+DM0 RAM used:       17084    (of 20480)
+DM1 RAM used:       01342    (of 20480)
+PM  RAM used(Data): 00000    (of 8192)
+PM  RAM used(Inst): 01375    (of 8192) 949 instructions (32bit: 523  64bit: 426)
+Total PM used:      01375    (of 8192)
+
+--------------------------------------------------------------------------------------
+STREAM                        Inst      Inst      DM0     DM1     PM
+Instance                      (cycles)  (size)    
+--------------------------------------------------------------------------------------
+STACK                          -         -        16      0       0       
+VolumePot                     26        45        0       10      0
+MasterVolume                  25        44        3       8       0
+FRAMEWORK                     58        39        19      0       0
+BusChain2_2                   28        28        50      46      0
+BusChain1_2                   28        28        50      46      0
+BusChain1_1                   28        28        50      45      0
+BusChain2_1                   28        28        50      45      0
+OutChain1_2                   38        26        75      66      0
+OutChain3_2                   38        26        75      66      0
+OutChain8_2                   38        26        75      66      0
+OutChain7_2                   38        26        75      66      0
+OutChain6_2                   38        26        75      66      0
+OutChain5_2                   38        26        75      66      0
+OutChain4_2                   38        26        75      66      0
+OutChain2_2                   38        26        75      66      0
+OutChain3_1                   38        26        75      65      0
+OutChain2_1                   38        25        75      65      0
+OutChain1_1                   38        25        75      65      0
+OutChain4_1                   38        25        75      65      0
+OutChain7_1                   38        25        75      65      0
+OutChain8_1                   38        25        75      65      0
+OutChain5_1                   38        25        75      65      0
+OutChain6_1                   38        25        75      65      0
+Nx1-1_UAC                     14        18        18      2       0
+Nx1-1_Exp                     14        18        18      2       0
+Nx1-1_ESP32                   14        18        18      2       0
+Nx1-1_Analog                  14        18        18      2       0
+Nx1-1_Mux                     14        18        12      2       0
+Input ADC                     16        16        0       8       0
+Input UAC2                    16        16        0       8       0
+Input ESP32                   16        16        0       8       0
+Input Expansion               16        16        0       8       0
+OutGain8                      8         11        3       1       0
+OutGain7                      8         11        3       1       0
+OutGain6                      8         11        3       1       0
+OutGain5                      8         11        3       1       0
+OutGain4                      8         11        3       1       0
+OutGain2                      8         11        3       1       0
+OutGain1                      8         11        3       1       0
+OutGain3                      8         11        3       1       0
+BusGain2                      8         11        3       0       0
+BusGain1                      8         11        3       0       0
+Nx_ESP32_Right                7         10        9       1       0
+Nx_Out_Left                   7         10        9       1       0
+Nx_Out_Right                  7         10        9       1       0
+Nx_Exp_Left                   7         10        9       1       0
+Nx_Analog_Left                7         10        9       1       0
+Nx_UAC2_Left                  7         10        9       1       0
+Nx_Analog_Right               7         10        9       1       0
+Nx_ESP32_Left                 7         10        9       1       0
+Nx_UAC2_Right                 7         10        9       1       0
+Nx_Exp_Right                  7         10        9       1       0
+Nx_Left                       7         10        7       1       0
+Nx_Right                      7         10        7       1       0
+Nx1-1_SPDIF                   10        10        2       2       0
+OutDelay6                     8         9         1922    0       0
+OutDelay8                     8         9         1922    0       0
+OutDelay5                     8         9         1922    0       0
+OutDelay7                     8         9         1922    0       0
+OutDelay3                     8         9         1922    0       0
+OutDelay4                     8         9         1922    0       0
+OutDelay1                     8         9         1922    0       0
+OutDelay2                     8         9         1922    0       0
+OutRoute2                     7         9         4       1       0
+OutRoute8                     7         9         4       1       0
+OutRoute7                     7         9         4       1       0
+OutRoute6                     7         9         4       1       0
+OutRoute5                     7         9         4       1       0
+OutRoute4                     7         9         4       1       0
+OutRoute3                     7         9         4       1       0
+OutRoute1                     7         9         4       1       0
+OutInv3                       4         6         1       1       0
+BypassVolPoti                 5         6         1       1       0
+OutInv4                       4         6         1       1       0
+OutInv5                       4         6         1       1       0
+OutInv6                       4         6         1       1       0
+OutInv1                       4         6         1       1       0
+OutInv8                       4         6         1       1       0
+Nx_SPDIF_Right                5         6         1       1       0
+Nx_SPDIF_Left                 5         6         1       1       0
+OutInv7                       4         6         1       1       0
+OutInv2                       4         6         1       1       0
+SumGain                       5         5         1       1       0
+Shift1                        4         4         1       1       0
+SumAdd                        4         4         0       1       0
+ADC In1                       4         4         0       1       0
+AsrcIn1                       3         3         0       2       0
+Output 5                      2         3         0       0       0
+Output 6                      2         3         0       0       0
+Output 7                      2         3         0       0       0
+Output 8                      2         3         0       0       0
+Output 4                      2         3         0       0       0
+Output 3                      2         3         0       0       0
+SpdifOut_Right                2         3         0       0       0
+Output 1                      2         3         0       0       0
+SpdifOut_Left                 2         3         0       0       0
+Output 2                      2         3         0       0       0
+DC1                           2         2         1       1       0
+Output_UAC3                   2         2         0       0       0
+Output_UAC5                   2         2         0       0       0
+Output_UAC7                   2         2         0       0       0
+Output_UAC4                   2         2         0       0       0
+Output_UAC8                   2         2         0       0       0
+Output_UAC1                   2         2         0       0       0
+Output_UAC6                   2         2         0       0       0
+Output_UAC2                   2         2         0       0       0
+--------------------------------------------------------------------------------------
+Total                         1362      1321      17080   1338    0
+--------------------------------------------------------------------------------------
+(% Fs=48.0kHz)                23%       17%       84%     7%      0%
+
