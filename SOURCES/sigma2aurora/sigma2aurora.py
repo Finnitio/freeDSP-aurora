@@ -5,6 +5,7 @@ import argparse
 import os
 import struct
 import shutil
+import re
 
 try:
     to_unicode = unicode
@@ -239,6 +240,12 @@ for ii in range(0, ninputs):
     inputselect_port.append(GrowingList())
 
 npeqbank = 0
+
+# Matrix plugin: cells are collected by (channel, part) / channel index
+matrix_chain = {'bus': {}, 'out': {}}  # (channel, part) -> [first coeff addr per biquad]
+matrix_single = {'busgain': {}, 'outgain': {}, 'outpol': {},
+                 'outdly': {}, 'outroute': {}}  # channel -> address
+matrix_maxdly = 0
 
 
 def intaddr(node):
@@ -500,6 +507,32 @@ for module in root.findall('IC/Module'):
             if "target" in modname:
                 mastervol = intaddr(modparam)
 
+    # --- Matrix: generic biquad chains (5 words per biquad: B2 B1 B0 A2 A1)
+    elif re.match(r'plugin\.(bus|out)chain\d+_\d+$', cellname.text.lower()):
+        kind, ch, part = re.match(r'plugin\.(bus|out)chain(\d+)_(\d+)$',
+                                  cellname.text.lower()).groups()
+        params = module.findall('Algorithm/ModuleParameter')
+        matrix_chain[kind][(int(ch), int(part))] = [
+            intaddr(params[ii]) for ii in range(0, len(params), 5)]
+
+    # --- Matrix: per-Channel blocks
+    elif re.match(r'plugin\.(busgain|outgain|outinv|outdelay|outroute)\d+$',
+                  cellname.text.lower()):
+        kind, ch = re.match(r'plugin\.([a-z]+?)(\d+)$',
+                            cellname.text.lower()).groups()
+        modparam = module.find('Algorithm/ModuleParameter')
+        key = {'busgain': 'busgain', 'outgain': 'outgain', 'outinv': 'outpol',
+               'outdelay': 'outdly', 'outroute': 'outroute'}[kind]
+        matrix_single[key][int(ch)] = intaddr(modparam)
+        if kind == 'outdelay':
+            maxdly = re.search(r'max\[\s*(\d+)\s*\]',
+                               module.find('Algorithm/Description').text)
+            if maxdly:
+                matrix_maxdly = max(matrix_maxdly, int(maxdly.group(1)))
+
+    elif cellname.text.lower() == 'plugin.sumgain':
+        pass
+
     elif cellname.text.lower().startswith('plugin.'):
         print("[WARNING] Unkown dsp block in plugin: " + cellname.text)
 
@@ -710,6 +743,37 @@ data = {
     "version": version,
 }
 
+ismatrix = len(matrix_chain['bus']) > 0 or len(matrix_chain['out']) > 0
+if ismatrix:
+    def chain_flat(kind):
+        # Channel-major, part _1 then _2 (not adjacent in DSP memory)
+        chans = sorted(set(ch for ch, part in matrix_chain[kind]))
+        parts = sorted(set(part for ch, part in matrix_chain[kind]))
+        return (len(chans), [addr for ch in chans for part in parts
+                             for addr in matrix_chain[kind][(ch, part)]])
+
+    def single(key):
+        return [matrix_single[key][ch] for ch in sorted(matrix_single[key])]
+
+    nbus, busbiquad = chain_flat('bus')
+    nout, outbiquad = chain_flat('out')
+    if len(busbiquad) // nbus != len(outbiquad) // nout:
+        print("[ERROR] Bus and Output biquad counts per channel differ.")
+    data.update({
+        "kind": "matrix",
+        "nbus": nbus,
+        "nout": nout,
+        "nbiquad": len(outbiquad) // nout,
+        "busbiquad": busbiquad,
+        "outbiquad": outbiquad,
+        "busgain": single('busgain'),
+        "outgain": single('outgain'),
+        "outpol": single('outpol'),
+        "outdly": single('outdly'),
+        "outroute": single('outroute'),
+        "maxdly": matrix_maxdly,
+    })
+
 webapp_path = os.path.join('..', 'WEBAPP')
 project_path = os.path.join('.', outputdir + projectname)
 
@@ -739,7 +803,10 @@ shutil.copy2(darkcss_src_path, darkcss_dst_path)
 chnames_txt_path = os.path.join(project_path, "chnames.txt")
 chnames_txt_created = False
 
-if args.gui:
+if ismatrix:
+    # --- Matrix page is hand-written, no generated dsp.html
+    print("Matrix plugin: skipping dsp.html")
+elif args.gui:
     # --- Copy custom GUI html
     print("Copying custom dsp.html")
     print(args.gui)
