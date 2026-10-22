@@ -17,6 +17,7 @@ struct tSettings
   bool vpot;
   String pwdap;
   String apname;
+  int apchannel;
   int adcsum;
   bool wifiOn;
 };

@@ -7,6 +7,7 @@
 #include "plugin.h"
 #include "settings.h"
 #include "config.h"
+#include "apconfig.h"
 
 //==============================================================================
 /*! Write the device settings to JSON file.
@@ -24,6 +25,7 @@ void writeSettings( void )
     jsonSettings["vpot"] = Settings.vpot;
     jsonSettings["pwdap"] = Settings.pwdap;
     jsonSettings["apname"] = Settings.apname;
+    jsonSettings["apchannel"] = Settings.apchannel;
     jsonSettings["adcsum"] = Settings.adcsum;
     jsonSettings["wifion"] = Settings.wifiOn;
 
@@ -47,6 +49,7 @@ void readSettings( void )
   Settings.vpot = false;
   Settings.pwdap = "";
   Settings.apname = AP_HOSTNAME;
+  Settings.apchannel = AP_CHANNEL_DEFAULT;
   Settings.adcsum = 0;
   Settings.wifiOn = true;
 
@@ -94,6 +97,8 @@ void readSettings( void )
     Settings.pwdap = jsonSettings["pwdap"].as<String>();
     if( !jsonSettings["apname"].isNull() )
       Settings.apname = jsonSettings["apname"].as<String>();
+    if( !jsonSettings["apchannel"].isNull() )
+      Settings.apchannel = jsonSettings["apchannel"].as<int>();
     Settings.adcsum = jsonSettings["adcsum"].as<String>().toInt();
     // When updating from earlier version jsonSettings["wifion"] could return "null".
     // Then it should use the default value

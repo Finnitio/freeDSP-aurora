@@ -23,6 +23,7 @@
 #include "inputrouting.h"
 #include "i2cworker.h"
 #include "bodybuffer.h"
+#include "apconfig.h"
 
 #if HAVE_DISPLAY
 extern void updateUI(void);
@@ -890,6 +891,7 @@ void handleGetWifiConfigJson( AsyncWebServerRequest* request )
   AsyncJsonResponse* response = new AsyncJsonResponse();
   JsonVariant& jsonResponse = response->getRoot();
   jsonResponse["apname"] = Settings.apname;
+  jsonResponse["apchannel"] = Settings.apchannel;
   jsonResponse["ssid"] = Settings.ssid;
 
   response->setLength();
@@ -1520,8 +1522,19 @@ void handlePostPasswordApJson( JsonObject root )
 
   Settings.pwdap = root["pwdap"].as<String>();
   Settings.apname = root["apname"].as<String>();
+  Settings.apchannel = root["apchannel"].as<int>();
 
   writeSettings();
+}
+
+//==============================================================================
+/*! Checks the access point settings before they are queued. Returns a message
+ *  for the UI or NULL.
+ */
+static const char* validatePostPasswordApJson( JsonObject root )
+{
+  return apConfigError( root["pwdap"].as<String>().c_str(), root["apname"].as<String>().c_str(),
+                        root["apchannel"].as<int>() );
 }
 
 //==============================================================================
@@ -1778,7 +1791,8 @@ String handleGetAllNamesJson( void )
  *  worker. The request is answered right away; nothing here touches I2C.
  */
 static void postJson( AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total,
-                      void (*apply)( JsonObject ), size_t jsonCapacity = 1024 )
+                      void (*apply)( JsonObject ), size_t jsonCapacity = 1024,
+                      const char* (*validate)( JsonObject ) = NULL )
 {
   char* body = (char*)request->_tempObject;  // freed by the request
   const bool hadBody = ( body != NULL );
@@ -1802,6 +1816,16 @@ static void postJson( AsyncWebServerRequest* request, uint8_t* data, size_t len,
     Serial.println( err.c_str() );
     request->send( 400, "text/plain", err.c_str() );
     return;
+  }
+
+  if( validate )
+  {
+    const char* msg = validate( doc->as<JsonObject>() );
+    if( msg )
+    {
+      request->send( 400, "text/plain", msg );
+      return;
+    }
   }
 
   if( !i2cPost( [doc, apply]() { apply( doc->as<JsonObject>() ); } ) )
@@ -1937,7 +1961,7 @@ void setupWebserver (void)
   });
   server.on( "/pwdap", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
   {
-    postJson( request, data, len, index, total, handlePostPasswordApJson );
+    postJson( request, data, len, index, total, handlePostPasswordApJson, 1024, validatePostPasswordApJson );
   });
   server.on( "/upload", HTTP_POST, [](AsyncWebServerRequest *request){
     request->send(200, "text/plain", "OK");
@@ -2017,7 +2041,12 @@ void setupWebserver (void)
 
   });
 
-//  server.onNotFound([](AsyncWebServerRequest *request){
-//    Serial.println(request->url().c_str());
-//  });
+  // Connectivity checks of phones/PCs (DNS sends every name here)
+  server.onNotFound([](AsyncWebServerRequest *request){
+    const CaptiveAnswer* a = captiveAnswer( request->url().c_str() );
+    if( a )
+      request->send( a->status, a->type, a->body );
+    else
+      request->send( 404 );
+  });
 }

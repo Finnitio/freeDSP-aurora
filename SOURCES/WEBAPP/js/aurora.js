@@ -223,16 +223,27 @@ function sendPwdAP(){
   var data={};
   data.pwdap=document.getElementById("pwdap").value;
   data.apname=document.getElementById("apname").value;
-  if((data.pwdap.length>7) || (data.pwdap.length==0)){
+  data.apchannel=parseInt(document.getElementById("apchannel").value,10);
+  if((data.pwdap.length>0) && (data.pwdap.length<8)){
+    alert("Please select a password with at least 8 characters.");
+    return;
+  }
+  if((data.apname.length<1) || (data.apname.length>32)){
+    alert("The name must have 1 to 32 characters.");
+    return;
+  }
+  if(!(data.apchannel>=1 && data.apchannel<=13)){
+    alert("The channel must be between 1 and 13.");
+    return;
+  }
   fetch("/pwdap",{method:"POST",headers:{"Content-Type": "application/json"},body:JSON.stringify(data)})
   .then(function(response){
-    alert("Success! The configuration of the access point has been stored.");
+    if(response.ok)
+      alert("Success! The configuration of the access point has been stored. It is applied after a restart.");
+    else
+      response.text().then(function(t){alert("Not stored: "+t);});
     return response;})
   .catch(function(err){console.log(err);});
-  }
-  else {
-    alert("Please select a password with at least 8 characters.");
-  }
 }
 
 function configDev(){document.getElementById("configDev").style.display = "block";getConfig();}
@@ -243,7 +254,8 @@ function getWifiConfig(){
   fetch("/wificonfig").then (function(response) {return response.json();})
   .then(function(data) {
     document.getElementById('ssid').value = data.ssid;
-    document.getElementById('apname').value = data.apname;})
+    document.getElementById('apname').value = data.apname;
+    document.getElementById('apchannel').value = data.apchannel;})
   .catch(function(error) {console.log(error);});
 }
 
