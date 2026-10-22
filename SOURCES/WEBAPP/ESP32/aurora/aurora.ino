@@ -216,18 +216,27 @@ static void startAP()
   IPAddress subnet(255, 255, 255, 0);
 
   // Settings from an older file or edited by hand may be invalid
-  const char* err = apConfigError(Settings.pwdap.c_str(), Settings.apname.c_str(), Settings.apchannel);
   String name = Settings.apname;
   String pwd = Settings.pwdap;
   int channel = Settings.apchannel;
+  // Name and channel fall back to their defaults; the password never does
+  const char* err = apConfigError("", name.c_str(), channel);
   if(err)
   {
     Serial.print(F("[ERROR] AP settings: "));
     Serial.println(err);
-    Serial.println(F("Falling back to the default AP name, open, default channel"));
+    Serial.println(F("Falling back to the default AP name and channel"));
     name = AP_HOSTNAME;
-    pwd = "";
     channel = AP_CHANNEL_DEFAULT;
+  }
+  err = apConfigError(pwd.c_str(), name.c_str(), channel);
+  if(err)
+  {
+    // Not falling back to an open AP: that would expose the DSP unnoticed
+    Serial.print(F("[ERROR] AP settings: "));
+    Serial.println(err);
+    Serial.println(F("AP NOT started. Fix pwdap in the settings file."));
+    return;
   }
 
   bool ok;
@@ -414,6 +423,7 @@ void setup()
   //----------------------------------------------------------------------------
   #if HAVE_DISPLAY
   haveDisplay = false;
+  i2cLock();
   Wire.beginTransmission(SSD1309_I2C_ADDR);
   if(Wire.endTransmission(true) == 0)
   {
@@ -432,6 +442,7 @@ void setup()
       haveDisplay = true;
     }
   }
+  i2cUnlock();
 
   //----------------------------------------------------------------------------
   //--- Init Display (if present)
@@ -698,7 +709,6 @@ void loop()
     {
       i2cPost( []() { increase_volume(); needUpdateUI = true; } );
       lastREval = rotaryEncoder.getRotationValue();
-      needUpdateUI = true;
     }
     else if( editMode == 1 )
     {
@@ -707,7 +717,6 @@ void loop()
       i2cPost( []() { next_preset(); needUpdateUI = true; } );
 
       lastREval = rotaryEncoder.getRotationValue();
-      needUpdateUI = true;
     }
     else if(editMode == 2)
     {
@@ -721,7 +730,6 @@ void loop()
           needUpdateUI = true;
         } );
         lastREval = rotaryEncoder.getRotationValue();
-        needUpdateUI = true;
       }
     }
   }
@@ -731,7 +739,6 @@ void loop()
     {
       i2cPost( []() { decrease_volume(); needUpdateUI = true; } );
       lastREval = rotaryEncoder.getRotationValue();
-      needUpdateUI = true;
     }
     else if( editMode == 1 )
     {
@@ -740,7 +747,6 @@ void loop()
       i2cPost( []() { prev_preset(); needUpdateUI = true; } );
 
       lastREval = rotaryEncoder.getRotationValue();
-      needUpdateUI = true;
     }
     else if(editMode == 2)
     {
@@ -754,7 +760,6 @@ void loop()
           needUpdateUI = true;
         } );
         lastREval = rotaryEncoder.getRotationValue();
-        needUpdateUI = true;
       }
     }
   }
