@@ -162,9 +162,14 @@ function slider(i,lbl,key,min,max,step,val,unit,shownVal){
    +"<span class='gv' id='"+id+"'>"+shown(shownVal)+" "+unit+"</span></div>";
 }
 function slotVal(key,v){return key=="freq"?fval(parseInt(v)):parseFloat(v);}
+var UNIT={freq:"Hz",q:"",gain:"dB",slope:""};
+// the parameters each Slot type has
+var KEYS={peq:["freq","q","gain"],hp:["freq"],lp:["freq"],lshelf:["freq","gain","slope"],hshelf:["freq","gain","slope"],phase:["freq","q"]};
+var TNAME={peq:"PEQ",hp:"HP",lp:"LP",lshelf:"Low shelf",hshelf:"High shelf",phase:"Phase"};
+function cname(o){return o.d?o.d.toUpperCase()+" "+o.o:TNAME[o.t];}
 function slotSet(i,key,v){
   var x=slotVal(key,v);
-  document.getElementById("s"+i+key).textContent=x+" "+{freq:"Hz",q:"",gain:"dB"}[key];
+  document.getElementById("s"+i+key).textContent=x+" "+UNIT[key];
   var f={op:"set",i:i};f[key]=x;
   live("s"+i+key,view.ch,view.idx,{slot:f});
 }
@@ -175,6 +180,20 @@ function slotSend(i,key,v){
 function addSlot(){send(view.ch,view.idx,{slot:{op:"add"}});}
 function delSlot(i){send(view.ch,view.idx,{slot:{op:"del",i:i}});}
 function bypass(i,b){send(view.ch,view.idx,{slot:{op:"set",i:i,bypass:b}});}
+function setType(i,t){send(view.ch,view.idx,{slot:{op:"set",i:i,type:t}});}
+function setOrder(i,j){var o=st.choices[j];send(view.ch,view.idx,{slot:{op:"set",i:i,design:o.d,order:o.o}});}
+// Type and order lists: entries that need more biquads than the Slot may take (s.avail) are greyed out.
+function typeSel(i,s){
+  return "<select class='name' onchange=\"setType("+i+",this.value)\">"+st.types.map(function(t){
+    var ok=st.choices.some(function(o){return o.t==t&&o.c<=s.avail;});
+    return "<option value='"+t+"'"+(t==s.type?" selected":"")+(ok?"":" disabled")+">"+TNAME[t]+"</option>";}).join("")+"</select>";
+}
+function orderSel(i,s){
+  if(s.type!="hp"&&s.type!="lp")return "";
+  return "<select onchange=\"setOrder("+i+",this.value)\">"+st.choices.map(function(o,j){
+    if(o.t!=s.type)return "";
+    return "<option value='"+j+"'"+(o.d==s.design&&o.o==s.order?" selected":"")+(o.c<=s.avail?"":" disabled")+">"+cname(o)+" ("+o.c+")</option>";}).join("")+"</select>";
+}
 function topGain(v){
   document.getElementById("tgv").textContent=v+" dB";
   live("tg"+view.ch+view.idx,view.ch,view.idx,{gain:parseFloat(v)});
@@ -204,9 +223,9 @@ function refreshLabels(c){
   if(view.ch=="out"&&(e=document.getElementById("dapp")))e.innerHTML=applied(c);
   if(a!="tgi"&&(e=document.getElementById("tgv")))e.textContent=c.gain+" dB";
   c.slots.forEach(function(s,i){
-    [["freq",s.freq,"Hz"],["q",s.q,""],["gain",s.gain,"dB"]].forEach(function(k){
-      if(a=="s"+i+k[0]+"i")return;
-      if(e=document.getElementById("s"+i+k[0]))e.textContent=shown(k[1])+" "+k[2];
+    KEYS[s.type].forEach(function(k){
+      if(a=="s"+i+k+"i")return;
+      if(e=document.getElementById("s"+i+k))e.textContent=shown(s[k])+" "+UNIT[k];
     });
   });
 }
@@ -214,7 +233,7 @@ function drawF(){
   var c=chan();
   document.getElementById("ftitle").textContent=c.name;
   document.getElementById("budget").textContent="Biquads: "+c.used+" of "+c.budget+" used, "+c.free+" free";
-  document.getElementById("add").disabled=c.addable.indexOf("peq")<0;
+  document.getElementById("add").disabled=c.addable.length==0;  // nothing fits any more
   var sig=JSON.stringify(c.slots);  // the plot depends on the Slots only
   if(sig!=csig){csig=sig;if(!ct)ct=setTimeout(function(){ct=0;if(view)coeffs();},150);}
   if(busy("#slots,#top")){late=true;refreshLabels(c);return;}
@@ -222,12 +241,14 @@ function drawF(){
   document.getElementById("top").innerHTML=topHtml(c);
   var h="",p=st.peq;
   c.slots.forEach(function(s,i){
-    h+="<div class='slot'><div class='row'><b class='name'>PEQ "+(i+1)+"</b>"
+    var k=KEYS[s.type];
+    h+="<div class='slot'><div class='row'>"+typeSel(i,s)+orderSel(i,s)
      +"<button class='mute"+(s.bypass?" on":"")+"' onclick='bypass("+i+","+!s.bypass+")'>Bypass</button>"
      +"<button class='mute' onclick='delSlot("+i+")'>Delete</button></div>"
      +slider(i,"Freq","freq",0,1000,1,fpos(s.freq),"Hz",s.freq)
-     +slider(i,"Q","q",p.qmin,p.qmax,0.1,s.q,"",s.q)
-     +slider(i,"Gain","gain",p.gmin,p.gmax,0.5,s.gain,"dB",s.gain)+"</div>";
+     +(k.indexOf("q")<0?"":slider(i,"Q","q",p.qmin,p.qmax,0.1,s.q,"",s.q))
+     +(k.indexOf("gain")<0?"":slider(i,"Gain","gain",p.gmin,p.gmax,0.5,s.gain,"dB",s.gain))
+     +(k.indexOf("slope")<0?"":slider(i,"Slope","slope",st.slopemin,st.slopemax,0.05,s.slope,"",s.slope))+"</div>";
   });
   document.getElementById("slots").innerHTML=h;
 }
