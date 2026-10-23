@@ -60,9 +60,13 @@ public:
   /*! Applies a patch {"ch":"bus"|"out","idx":n, name, mute, gain, source (Bus), route (Output),
    *  gainBypass, and on Outputs only polarity (bool), delayUs (rounded to whole samples, max 40 ms)
    *  and delayBypass,
-   *  slot: {"op":"add","freq","q","gain"} | {"op":"del","i"} | {"op":"set","i", freq, q, gain, bypass}}.
+   *  slot: {"op":"add", type, design, order, freq, q, gain, slope} | {"op":"del","i"} | {"op":"set","i", the same, bypass}}.
+   *  type: "peq" (default), "hp", "lp", "lshelf", "hshelf", "phase"; HP/LP: design "bw" (order 1-8, default)
+   *  or "lr" (order 2, 4, 8), default order 2; shelf slope 0.1-1.
    *  SPDIF out: {"ch":"spdif","sel":code} with the left code of one of the offered pairs (stateJson "spdifopts").
-   *  PEQ Slots sit on the Channel's biquads in the order added (stage = Slot index).
+   *  Slots sit on the Channel's biquads in the order added, each taking cost() of them: Butterworth
+   *  order n = ceil(n/2), Linkwitz-Riley order n = n/2, everything else 1. An add or a type/order
+   *  change that would exceed the budget is rejected.
    *  Returns "" on success, else the rejection reason; a rejected patch changes nothing. */
   std::string apply( JsonObject patch, uint32_t nowMs );
 
@@ -97,11 +101,22 @@ public:
 private:
   void reset( void );
 
-  struct Slot  // PEQ
+  enum SlotType { SLOT_PEQ, SLOT_HP, SLOT_LP, SLOT_LSHELF, SLOT_HSHELF, SLOT_PHASE };
+
+  struct Slot
   {
     bool bypass;
+    SlotType type;
+    bool lr;     // HP/LP: Linkwitz-Riley instead of Butterworth
+    int order;   // HP/LP: Butterworth 1-8, Linkwitz-Riley 2, 4, 8
     float freq, q, gain;
+    float slope;  // Shelves
   };
+
+  static int cost( const Slot& s );
+  static int choiceCount( void );
+  static Slot choice( int n );  // the n-th selectable type/order, other fields default
+  static int slotCoefs( const Slot& s, MatrixCoef* out );
 
   struct Channel
   {
@@ -119,6 +134,7 @@ private:
   typedef MatrixCoef Coef;
 
   double linear( const Channel& c ) const;
+  static int used( const Channel& c );  // biquads taken by the Slots
   int slotCount( void ) const;
   std::string applySlot( JsonObject op, Channel& c ) const;
   void stages( const Channel& c, std::vector<Coef>& out ) const;

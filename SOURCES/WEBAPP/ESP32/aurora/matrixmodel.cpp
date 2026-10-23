@@ -12,6 +12,7 @@ static const float kSampleRate = 48000.0f;
 static const float kFreqMin = 20.0f, kFreqMax = 20000.0f;
 static const float kQMin = 0.1f, kQMax = 20.0f;
 static const float kPeqGainMin = -24.0f, kPeqGainMax = 24.0f;
+static const float kSlopeMin = 0.1f, kSlopeMax = 1.0f;
 static const float kGainMin = -80.0f;
 static const float kGainMax = 12.0f;
 static const int kNumRoutes = 3;  // Bus 1, Bus 2, Bus 1+2
@@ -96,14 +97,96 @@ static MatrixCoef passthroughCoef( void )
   return c;
 }
 
-/*! One biquad per Slot, in the order of the Slots; unused and bypassed stages are passthrough. */
+//==============================================================================
+static const char* const kTypeNames[] = { "peq", "hp", "lp", "lshelf", "hshelf", "phase" };
+static const int kNumTypes = 6;
+static const int kMaxOrder = 8;
+
+/*! Butterworth order n = ceil(n/2) biquads, Linkwitz-Riley order n = n/2, the rest 1. */
+int MatrixModel::cost( const Slot& s )
+{
+  if( s.type != SLOT_HP && s.type != SLOT_LP )
+    return 1;
+  return s.lr ? s.order / 2 : ( s.order + 1 ) / 2;
+}
+
+static bool orderValid( bool lr, int order )
+{
+  return lr ? ( order == 2 || order == 4 || order == 8 ) : ( order >= 1 && order <= kMaxOrder );
+}
+
+/*! The selectable types and orders: PEQ, low shelf, high shelf, Phase, then HP and LP with
+ *  Butterworth 1-8 and Linkwitz-Riley 2, 4, 8. */
+int MatrixModel::choiceCount( void )
+{
+  return 4 + 2 * ( kMaxOrder + 3 );
+}
+
+MatrixModel::Slot MatrixModel::choice( int n )
+{
+  Slot s = { false, SLOT_PEQ, false, 2, 1000.0f, 1.0f, 0.0f, 1.0f };
+  if( n < 4 )
+  {
+    static const SlotType t[4] = { SLOT_PEQ, SLOT_LSHELF, SLOT_HSHELF, SLOT_PHASE };
+    s.type = t[n];
+    return s;
+  }
+  n -= 4;
+  s.type = n < kMaxOrder + 3 ? SLOT_HP : SLOT_LP;
+  n %= kMaxOrder + 3;
+  s.lr = ( n >= kMaxOrder );
+  s.order = s.lr ? 2 << ( n - kMaxOrder ) : n + 1;
+  return s;
+}
+
+int MatrixModel::used( const Channel& c )
+{
+  int n = 0;
+  for( size_t i = 0; i < c.slots.size(); i++ )
+    n += cost( c.slots[i] );
+  return n;
+}
+
+/*! The biquads of one Slot (cost() of them, at most 4). */
+int MatrixModel::slotCoefs( const Slot& s, Coef* out )
+{
+  float a[12], b[12];
+  int n = 1;
+  switch( s.type )
+  {
+  case SLOT_PEQ:    AudioFilterFactory::makeParametricEQ( a, b, s.gain, s.freq, s.q, kSampleRate ); break;
+  case SLOT_LSHELF: AudioFilterFactory::makeLowShelv( a, b, s.gain, s.freq, s.slope, kSampleRate ); break;
+  case SLOT_HSHELF: AudioFilterFactory::makeHighShelv( a, b, s.gain, s.freq, s.slope, kSampleRate ); break;
+  case SLOT_PHASE:  AudioFilterFactory::makeAllpass( a, b, s.freq, s.q, kSampleRate ); break;
+  case SLOT_HP:
+  case SLOT_LP:
+    n = s.lr ? AudioFilterFactory::makeLinkwitzRiley( a, b, s.type == SLOT_HP, s.order, s.freq, kSampleRate )
+             : AudioFilterFactory::makeButterworth( a, b, s.type == SLOT_HP, s.order, s.freq, kSampleRate );
+    break;
+  }
+  for( int k = 0; k < n; k++ )
+    for( int j = 0; j < 3; j++ )
+    {
+      out[k].a[j] = a[3 * k + j];
+      out[k].b[j] = b[3 * k + j];
+    }
+  return n;
+}
+
+/*! The Slots packed onto the biquads in order; unused and bypassed stages are passthrough. */
 void MatrixModel::stages( const Channel& c, std::vector<Coef>& out ) const
 {
   out.assign( nbiquad_, passthroughCoef() );
-  for( size_t i = 0; i < c.slots.size() && (int)i < nbiquad_; i++ )
-    if( !c.slots[i].bypass )
-      AudioFilterFactory::makeParametricEQ( out[i].a, out[i].b, c.slots[i].gain, c.slots[i].freq,
-                                            c.slots[i].q, kSampleRate );
+  int at = 0;
+  for( size_t i = 0; i < c.slots.size() && at < nbiquad_; i++ )
+  {
+    Coef sc[4];
+    const int n = slotCoefs( c.slots[i], sc );
+    for( int k = 0; k < n && at + k < nbiquad_; k++ )
+      if( !c.slots[i].bypass )
+        out[at + k] = sc[k];
+    at += n;
+  }
 }
 
 /*! Writes the biquads that differ from prev (all of them if prev is NULL). */
@@ -128,14 +211,9 @@ std::string MatrixModel::applySlot( JsonObject op, Channel& c ) const
   if( !add && strcmp( name, "del" ) != 0 && strcmp( name, "set" ) != 0 )
     return "unknown slot op";
 
-  Slot s = { false, 1000.0f, 1.0f, 0.0f };
+  Slot s = choice( 0 );
   int at = -1;
-  if( add )
-  {
-    if( (int)c.slots.size() >= nbiquad_ )
-      return "no biquads left";
-  }
-  else
+  if( !add )
   {
     if( !op["i"].is<int>() || op["i"].as<int>() < 0 || op["i"].as<int>() >= (int)c.slots.size() )
       return "no such slot";
@@ -148,8 +226,9 @@ std::string MatrixModel::applySlot( JsonObject op, Channel& c ) const
     return "";
   }
   const struct { const char* key; float lo, hi; float* v; } nums[] = {
-    { "freq", kFreqMin, kFreqMax, &s.freq }, { "q", kQMin, kQMax, &s.q }, { "gain", kPeqGainMin, kPeqGainMax, &s.gain } };
-  for( size_t k = 0; k < 3; k++ )
+    { "freq", kFreqMin, kFreqMax, &s.freq }, { "q", kQMin, kQMax, &s.q }, { "gain", kPeqGainMin, kPeqGainMax, &s.gain },
+    { "slope", kSlopeMin, kSlopeMax, &s.slope } };
+  for( size_t k = 0; k < 4; k++ )
   {
     if( !op.containsKey( nums[k].key ) )
       continue;
@@ -166,6 +245,33 @@ std::string MatrixModel::applySlot( JsonObject op, Channel& c ) const
       return "bypass must be true or false";
     s.bypass = op["bypass"].as<bool>();
   }
+  if( op.containsKey( "type" ) )
+  {
+    const char* t = op["type"].as<const char*>();
+    int k = 0;
+    while( t && k < kNumTypes && strcmp( t, kTypeNames[k] ) != 0 )
+      k++;
+    if( k == kNumTypes )
+      return "no such slot type";
+    s.type = (SlotType)k;
+  }
+  if( op.containsKey( "design" ) )
+  {
+    const char* d = op["design"].as<const char*>();
+    if( !d || ( strcmp( d, "bw" ) != 0 && strcmp( d, "lr" ) != 0 ) )
+      return "design must be bw or lr";
+    s.lr = ( strcmp( d, "lr" ) == 0 );
+  }
+  if( op.containsKey( "order" ) )
+  {
+    if( !op["order"].is<int>() )
+      return "order must be a number";
+    s.order = op["order"].as<int>();
+  }
+  if( ( s.type == SLOT_HP || s.type == SLOT_LP ) && !orderValid( s.lr, s.order ) )
+    return s.lr ? "Linkwitz-Riley order must be 2, 4 or 8" : "Butterworth order must be 1 to 8";
+  if( used( c ) - ( add ? 0 : cost( c.slots[at] ) ) + cost( s ) > nbiquad_ )
+    return add ? "no biquads left" : "not enough biquads left";
   if( add )
     c.slots.push_back( s );
   else
@@ -452,15 +558,19 @@ std::string MatrixModel::coeffsJson( const char* ch, int idx ) const
   DynamicJsonDocument doc( 512 + 160 * nbiquad_ );
   doc["fs"] = (int)kSampleRate;
   JsonArray bq = doc.createNestedArray( "bq" );
-  for( size_t i = 0; i < c.slots.size() && (int)i < nbiquad_; i++ )
+  int at = 0;
+  for( size_t i = 0; i < c.slots.size(); i++ )
   {
-    if( c.slots[i].bypass )
-      continue;
-    // the DSP stores 8.24, convertTo824() truncates: floor to its grid; order b0 b1 b2 a1 a2
-    const double v[5] = { st[i].b[0], st[i].b[1], st[i].b[2], st[i].a[1], st[i].a[2] };
-    JsonArray row = bq.createNestedArray();
-    for( int k = 0; k < 5; k++ )
-      row.add( floor( v[k] * 16777216.0 ) / 16777216.0 );
+    const int n = cost( c.slots[i] );
+    for( int s = at; s < at + n && !c.slots[i].bypass; s++ )
+    {
+      // the DSP stores 8.24, convertTo824() truncates: floor to its grid; order b0 b1 b2 a1 a2
+      const double v[5] = { st[s].b[0], st[s].b[1], st[s].b[2], st[s].a[1], st[s].a[2] };
+      JsonArray row = bq.createNestedArray();
+      for( int k = 0; k < 5; k++ )
+        row.add( floor( v[k] * 16777216.0 ) / 16777216.0 );
+    }
+    at += n;
   }
   return toString( doc );
 }
@@ -489,21 +599,31 @@ void MatrixModel::putChannel( JsonArray arr, const Channel& c, const char* selKe
   for( size_t i = 0; i < c.slots.size(); i++ )
   {
     JsonObject s = slots.createNestedObject();
-    s["type"] = "peq";
-    s["freq"] = c.slots[i].freq;
-    s["q"] = c.slots[i].q;
-    s["gain"] = c.slots[i].gain;
-    s["bypass"] = c.slots[i].bypass;
+    const Slot& sl = c.slots[i];
+    s["type"] = kTypeNames[sl.type];
+    if( sl.type == SLOT_HP || sl.type == SLOT_LP )
+    {
+      s["design"] = sl.lr ? "lr" : "bw";
+      s["order"] = sl.order;
+    }
+    s["freq"] = sl.freq;
+    s["q"] = sl.q;
+    s["gain"] = sl.gain;
+    s["slope"] = sl.slope;
+    s["bypass"] = sl.bypass;
+    if( withLimits )
+      s["avail"] = nbiquad_ - used( c ) + cost( sl );  // biquads this Slot may take on a type/order change
   }
   if( withLimits )
   {
-    const int used = (int)c.slots.size();
+    const int free = nbiquad_ - used( c );
     o["budget"] = nbiquad_;
-    o["used"] = used;
-    o["free"] = nbiquad_ - used;
-    JsonArray add = o.createNestedArray( "addable" );  // Slot types that still fit
-    if( nbiquad_ - used >= 1 )
-      add.add( "peq" );
+    o["used"] = used( c );
+    o["free"] = free;
+    JsonArray add = o.createNestedArray( "addable" );  // indices into "choices" that still fit
+    for( int n = 0; n < choiceCount(); n++ )
+      if( cost( choice( n ) ) <= free )
+        add.add( n );
   }
 }
 
@@ -516,7 +636,7 @@ static std::string toString( const JsonDocument& doc )
 
 std::string MatrixModel::stateJson( void ) const
 {
-  DynamicJsonDocument doc( 12288 + 192 * slotCount() );
+  DynamicJsonDocument doc( 20480 + 288 * slotCount() );
   doc["nbus"] = nbus_;
   doc["nout"] = nout_;
   doc["nbiquad"] = nbiquad_;
@@ -530,6 +650,24 @@ std::string MatrixModel::stateJson( void ) const
   peq["qmax"] = kQMax;
   peq["gmin"] = kPeqGainMin;
   peq["gmax"] = kPeqGainMax;
+  doc["slopemin"] = kSlopeMin;
+  doc["slopemax"] = kSlopeMax;
+  JsonArray types = doc.createNestedArray( "types" );  // Slot types in the order of the page's dropdown
+  for( int n = 0; n < kNumTypes; n++ )
+    types.add( kTypeNames[n] );
+  JsonArray choices = doc.createNestedArray( "choices" );  // every selectable type/order and its biquad cost
+  for( int n = 0; n < choiceCount(); n++ )
+  {
+    const Slot s = choice( n );
+    JsonObject o = choices.createNestedObject();
+    o["t"] = kTypeNames[s.type];
+    if( s.type == SLOT_HP || s.type == SLOT_LP )
+    {
+      o["d"] = s.lr ? "lr" : "bw";
+      o["o"] = s.order;
+    }
+    o["c"] = cost( s );
+  }
   JsonArray srcs = doc.createNestedArray( "sources" );
   std::string names[kNumSources];
   for( int n = 0; n < kNumSources; n++ )
@@ -564,7 +702,7 @@ std::string MatrixModel::stateJson( void ) const
 
 std::string MatrixModel::savePreset( void ) const
 {
-  DynamicJsonDocument doc( 4096 + 192 * slotCount() );
+  DynamicJsonDocument doc( 4096 + 256 * slotCount() );
   doc["v"] = kPresetVersion;
   doc["spdif"] = (long)spdif_;
   JsonArray buses = doc.createNestedArray( "buses" );
@@ -612,22 +750,38 @@ std::string MatrixModel::readChannel( JsonObject o, bool isBus, Channel& c ) con
   }
   c.slots.clear();
   JsonArray slots = o["slots"];  // optional: presets from before the Filter row have none
-  if( (int)slots.size() > nbiquad_ )
-    return "too many slots";
   for( JsonObject s : slots )
   {
-    Slot sl;
+    Slot sl = choice( 0 );
     if( !s["freq"].is<float>() || !s["q"].is<float>() || !s["gain"].is<float>() || !s["bypass"].is<bool>() )
       return "bad slot";
     sl.freq = s["freq"];
     sl.q = s["q"];
     sl.gain = s["gain"];
     sl.bypass = s["bypass"];
+    // optional: presets from before the Slot types are all PEQs
+    if( s.containsKey( "type" ) )
+    {
+      const char* t = s["type"].as<const char*>();
+      int k = 0;
+      while( t && k < kNumTypes && strcmp( t, kTypeNames[k] ) != 0 )
+        k++;
+      if( k == kNumTypes )
+        return "bad slot";
+      sl.type = (SlotType)k;
+    }
+    sl.lr = ( strcmp( s["design"] | "bw", "lr" ) == 0 );
+    sl.order = s["order"] | 2;
+    sl.slope = s["slope"] | 1.0f;
     if( !( sl.freq >= kFreqMin && sl.freq <= kFreqMax && sl.q >= kQMin && sl.q <= kQMax
-           && sl.gain >= kPeqGainMin && sl.gain <= kPeqGainMax ) )
+           && sl.gain >= kPeqGainMin && sl.gain <= kPeqGainMax && sl.slope >= kSlopeMin && sl.slope <= kSlopeMax ) )
+      return "bad slot";
+    if( ( sl.type == SLOT_HP || sl.type == SLOT_LP ) && !orderValid( sl.lr, sl.order ) )
       return "bad slot";
     c.slots.push_back( sl );
   }
+  if( used( c ) > nbiquad_ )
+    return "too many slots";
   c.name = n;
   c.mute = o["mute"].as<bool>();
   c.gain = o["gain"].as<float>();

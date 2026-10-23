@@ -49,7 +49,7 @@ static std::string patch(MatrixModel& m, const char* json, uint32_t now = 0)
 
 static DynamicJsonDocument stateOf(const MatrixModel& m)
 {
-  DynamicJsonDocument doc(16384);
+  DynamicJsonDocument doc(65536);
   std::string s = m.stateJson();
   assert(!deserializeJson(doc, s));
   return doc;
@@ -373,7 +373,7 @@ static void budgetRejectsAndAddDisabled()
   DynamicJsonDocument st = stateOf(m);
   assert(st["outs"][1]["free"] == 0);
   assert(st["outs"][1]["addable"].size() == 0);
-  assert(st["outs"][0]["addable"].size() == 1);
+  assert(st["outs"][0]["addable"].size() > 0);
   assert(!patch(m, kAddPeq).empty());  // beyond the budget
   assert(port.bq.size() == n);
   assert(stateOf(m)["outs"][1]["slots"].size() == 2);
@@ -472,6 +472,271 @@ static void undoRestoresSlots()
   patch(m, kAddPeq);
   m.undo();
   assert(m.savePreset() == before);
+}
+
+//==============================================================================
+// Slot types: HP, LP, Shelf, Phase and their biquad cost
+static std::string slotPatch(const char* ch, int idx, const std::string& slot)
+{
+  return std::string("{\"ch\":\"") + ch + "\",\"idx\":" + std::to_string(idx) + ",\"slot\":{" + slot + "}}";
+}
+
+static std::string addSlot(MatrixModel& m, const std::string& body, const char* ch = "out", int idx = 1)
+{
+  return patch(m, slotPatch(ch, idx, "\"op\":\"add\"," + body).c_str());
+}
+
+static std::string setSlot(MatrixModel& m, int i, const std::string& body, const char* ch = "out", int idx = 1)
+{
+  return patch(m, slotPatch(ch, idx, "\"op\":\"set\",\"i\":" + std::to_string(i) + "," + body).c_str());
+}
+
+static void slotCostPerTypeAndOrder()
+{
+  struct { const char* body; int cost; } cases[] = {
+    { "\"type\":\"peq\"", 1 },
+    { "\"type\":\"lshelf\"", 1 },
+    { "\"type\":\"hshelf\"", 1 },
+    { "\"type\":\"phase\"", 1 },
+    { "\"type\":\"hp\",\"design\":\"bw\",\"order\":1", 1 },
+    { "\"type\":\"hp\",\"design\":\"bw\",\"order\":2", 1 },
+    { "\"type\":\"hp\",\"design\":\"bw\",\"order\":3", 2 },
+    { "\"type\":\"lp\",\"design\":\"bw\",\"order\":5", 3 },
+    { "\"type\":\"lp\",\"design\":\"bw\",\"order\":7", 4 },
+    { "\"type\":\"hp\",\"design\":\"bw\",\"order\":8", 4 },
+    { "\"type\":\"lp\",\"design\":\"lr\",\"order\":2", 1 },
+    { "\"type\":\"hp\",\"design\":\"lr\",\"order\":4", 2 },
+    { "\"type\":\"lp\",\"design\":\"lr\",\"order\":8", 4 },
+  };
+  for (size_t k = 0; k < sizeof(cases) / sizeof(cases[0]); k++)
+  {
+    FakePort port;
+    MatrixModel m(port, 2, 8, 8);
+    assert(addSlot(m, cases[k].body).empty());
+    DynamicJsonDocument st = stateOf(m);
+    assert(st["outs"][1]["used"] == cases[k].cost && st["outs"][1]["free"] == 8 - cases[k].cost);
+    assert((int)port.bq.size() == cases[k].cost);  // one write per biquad of the Slot, in order
+    for (int s = 0; s < cases[k].cost; s++)
+      assert(port.bq[s].stage == s && !isPassthrough(port.bq[s]));
+  }
+}
+
+static void slotsArepackedInOrder()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 8);
+  addSlot(m, "\"type\":\"peq\"");
+  addSlot(m, "\"type\":\"hp\",\"design\":\"bw\",\"order\":4");
+  addSlot(m, "\"type\":\"phase\"");
+  port.bq.clear();
+  // deleting the first Slot moves the BW4 to stages 0-1, the Phase to 2; stage 3 is freed
+  assert(patch(m, slotPatch("out", 1, "\"op\":\"del\",\"i\":0").c_str()).empty());
+  assert(port.bq.size() == 4);
+  assert(!isPassthrough(port.bq[0]) && !isPassthrough(port.bq[1]) && !isPassthrough(port.bq[2]));
+  assert(port.bq[3].stage == 3 && isPassthrough(port.bq[3]));
+  assert(coeffsOf(m, "out", 1)["bq"].size() == 3);
+}
+
+static void bypassOfAMultiBiquadSlotKeepsItsStages()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  addSlot(m, "\"type\":\"lp\",\"design\":\"lr\",\"order\":8");
+  port.bq.clear();
+  assert(setSlot(m, 0, "\"bypass\":true").empty());
+  assert(port.bq.size() == 4);
+  for (int s = 0; s < 4; s++)
+    assert(isPassthrough(port.bq[s]));
+  assert(stateOf(m)["outs"][1]["free"] == 0);
+  assert(coeffsOf(m, "out", 1)["bq"].size() == 0);
+  assert(setSlot(m, 0, "\"bypass\":false").empty());
+}
+
+static void typeCoefficientsGiveTheExpectedResponse()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 16);
+  addSlot(m, "\"type\":\"hp\",\"design\":\"bw\",\"order\":4,\"freq\":1000");
+  DynamicJsonDocument c = coeffsOf(m, "out", 1);
+  assert(c["bq"].size() == 2);
+  assert(std::fabs(magDb(c, 1000) + 3.0103) < 0.1);
+  // an octave below the corner: |H|^2 = 1 / (1 + (tan(wc/2) / tan(w/2))^8)
+  const double t = std::tan(M_PI * 1000 / 48000) / std::tan(M_PI * 500 / 48000);
+  assert(std::fabs(magDb(c, 500) + 10 * std::log10(1 + std::pow(t, 8))) < 0.1);
+  assert(std::fabs(magDb(c, 10000)) < 0.1);
+
+  FakePort p2;
+  MatrixModel m2(p2, 2, 8, 16);
+  addSlot(m2, "\"type\":\"lp\",\"design\":\"lr\",\"order\":8,\"freq\":2000");
+  c = coeffsOf(m2, "out", 1);
+  assert(c["bq"].size() == 4);
+  assert(std::fabs(magDb(c, 2000) + 6.0206) < 0.1);
+  assert(std::fabs(magDb(c, 200)) < 0.1);
+  assert(magDb(c, 4000) < -45);  // 48 dB/oct: -48 dB one octave up, less the corner offset
+
+  FakePort p3;
+  MatrixModel m3(p3, 2, 8, 16);
+  addSlot(m3, "\"type\":\"lshelf\",\"freq\":200,\"gain\":6,\"slope\":1");
+  addSlot(m3, "\"type\":\"hshelf\",\"freq\":5000,\"gain\":-6,\"slope\":1");
+  c = coeffsOf(m3, "out", 1);
+  assert(std::fabs(magDb(c, 20) - 6.0) < 0.3);
+  assert(std::fabs(magDb(c, 1000)) < 0.7);
+  assert(std::fabs(magDb(c, 20000) + 6.0) < 0.5);
+
+  FakePort p4;
+  MatrixModel m4(p4, 2, 8, 16);
+  addSlot(m4, "\"type\":\"phase\",\"freq\":1000,\"q\":0.7");
+  c = coeffsOf(m4, "out", 1);
+  assert(c["bq"].size() == 1);
+  for (double f : { 30.0, 500.0, 1000.0, 3000.0, 15000.0 })
+    assert(std::fabs(magDb(c, f)) < 0.05);  // allpass: flat magnitude
+  assert(!isPassthrough(p4.bq[0]));
+}
+
+static void slopeChangesTheShelf()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  addSlot(m, "\"type\":\"lshelf\",\"freq\":1000,\"gain\":6,\"slope\":1");
+  FakePort::Bq steep = port.bq[0];
+  port.bq.clear();
+  assert(setSlot(m, 0, "\"slope\":0.3").empty());
+  assert(port.bq.size() == 1 && port.bq[0].b[1] != steep.b[1]);
+  assert(stateOf(m)["outs"][1]["slots"][0]["slope"].as<double>() > 0.29);
+  assert(!setSlot(m, 0, "\"slope\":0").empty());
+  assert(!setSlot(m, 0, "\"slope\":1.5").empty());
+}
+
+static void slotTypeAndOrderAreValidated()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 16);
+  assert(!addSlot(m, "\"type\":\"notch\"").empty());
+  assert(!addSlot(m, "\"type\":\"hp\",\"design\":\"bessel\"").empty());
+  assert(!addSlot(m, "\"type\":\"hp\",\"design\":\"bw\",\"order\":0").empty());
+  assert(!addSlot(m, "\"type\":\"hp\",\"design\":\"bw\",\"order\":9").empty());
+  assert(!addSlot(m, "\"type\":\"hp\",\"design\":\"lr\",\"order\":3").empty());
+  assert(!addSlot(m, "\"type\":\"hp\",\"design\":\"lr\",\"order\":6").empty());
+  assert(!addSlot(m, "\"type\":\"hp\",\"design\":\"bw\",\"order\":\"2\"").empty());
+  assert(port.bq.empty() && stateOf(m)["outs"][1]["slots"].size() == 0);
+}
+
+// "type/design/order" of the choices a Channel offers for a new Slot
+static std::vector<std::string> addable(const DynamicJsonDocument& st, const char* ch, int idx)
+{
+  std::vector<std::string> r;
+  for (size_t i = 0; i < st[ch][idx]["addable"].size(); i++)
+  {
+    JsonVariantConst c = st["choices"][st[ch][idx]["addable"][i].as<int>()];
+    std::string s = c["t"].as<const char*>();
+    if (c["d"].is<const char*>())
+      s += std::string(":") + c["d"].as<const char*>() + std::to_string(c["o"].as<int>());
+    r.push_back(s);
+  }
+  return r;
+}
+
+static bool has(const std::vector<std::string>& v, const char* s)
+{
+  for (size_t i = 0; i < v.size(); i++)
+    if (v[i] == s)
+      return true;
+  return false;
+}
+
+static void selectableListFollowsTheFreeBudget()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 5);
+  assert(addSlot(m, "\"type\":\"lp\",\"design\":\"lr\",\"order\":8").empty());  // 4 of 5 used
+  std::vector<std::string> a = addable(stateOf(m), "outs", 1);
+  // one biquad left: PEQ, both Shelves, Phase, BW 1-2, LR2 (HP and LP)
+  assert(a.size() == 4 + 3 + 3);
+  for (const char* s : { "peq", "lshelf", "hshelf", "phase", "hp:bw1", "hp:bw2", "hp:lr2", "lp:bw1", "lp:bw2", "lp:lr2" })
+    assert(has(a, s));
+  assert(!has(a, "hp:bw3") && !has(a, "lp:lr4") && !has(a, "hp:bw8"));
+  // the other Channels still have everything free: 4 + 2 x (8 BW + 3 LR) = 26 choices fit
+  assert(addable(stateOf(m), "outs", 0).size() == 26);
+  assert(has(addable(stateOf(m), "outs", 0), "lp:lr8") && has(addable(stateOf(m), "outs", 0), "hp:bw8"));
+
+  assert(addSlot(m, "\"type\":\"peq\"").empty());  // budget used up
+  assert(addable(stateOf(m), "outs", 1).empty());
+  assert(!addSlot(m, "\"type\":\"peq\"").empty());
+}
+
+static void freeBudgetOfThreeOffersUpToSixthOrderButterworth()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 3);
+  std::vector<std::string> a = addable(stateOf(m), "outs", 0);
+  assert(has(a, "hp:bw5") && has(a, "hp:bw6") && has(a, "lp:lr4"));
+  assert(!has(a, "hp:bw7") && !has(a, "hp:bw8") && !has(a, "lp:lr8"));
+}
+
+static void raisingTheOrderBeyondTheBudgetIsRejected()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  addSlot(m, "\"type\":\"hp\",\"design\":\"bw\",\"order\":2,\"freq\":100");  // 1 biquad
+  addSlot(m, "\"type\":\"peq\"");                                           // 1 biquad, 2 free
+  // the Slot may use its own biquad plus the free ones: up to 3
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["outs"][1]["slots"][0]["avail"] == 3 && st["outs"][1]["slots"][1]["avail"] == 3);
+  port.bq.clear();
+  const std::string before = m.savePreset();
+  assert(!setSlot(m, 0, "\"order\":8").empty());                      // would need 4
+  assert(!setSlot(m, 0, "\"design\":\"lr\",\"order\":8").empty());    // would need 4
+  assert(!setSlot(m, 1, "\"type\":\"hp\",\"order\":8").empty());      // type change counts too
+  assert(port.bq.empty() && m.savePreset() == before);
+  assert(setSlot(m, 0, "\"order\":6").empty());                        // 3 biquads: fits exactly
+  st = stateOf(m);
+  assert(st["outs"][1]["used"] == 4 && st["outs"][1]["free"] == 0);
+  assert(st["outs"][1]["slots"][0]["avail"] == 3 && st["outs"][1]["slots"][1]["avail"] == 1);
+  assert(!setSlot(m, 0, "\"order\":8").empty());
+  // lowering the order frees biquads and repacks the Slots behind it
+  port.bq.clear();
+  assert(setSlot(m, 0, "\"order\":2").empty());
+  assert(port.bq.size() >= 3);  // stage 0 (new HP), stage 1 (the PEQ moved up), stages 2-3 passthrough
+  assert(stateOf(m)["outs"][1]["free"] == 2);
+}
+
+static void slotTypesRoundTripThroughPresets()
+{
+  FakePort port;
+  MatrixModel a(port, 2, 8, 12);
+  addSlot(a, "\"type\":\"hp\",\"design\":\"lr\",\"order\":4,\"freq\":80");
+  addSlot(a, "\"type\":\"lshelf\",\"freq\":200,\"gain\":3,\"slope\":0.5");
+  addSlot(a, "\"type\":\"phase\",\"freq\":900,\"q\":2");
+  addSlot(a, "\"type\":\"lp\",\"design\":\"bw\",\"order\":5,\"freq\":5000");
+  setSlot(a, 3, "\"bypass\":true");
+  std::string saved = a.savePreset();
+  FakePort port2;
+  MatrixModel b(port2, 2, 8, 12);
+  assert(b.loadPreset(saved).empty());
+  assert(b.savePreset() == saved);
+  DynamicJsonDocument st = stateOf(b);
+  assert(std::string(st["outs"][1]["slots"][3]["type"].as<const char*>()) == "lp");
+  assert(st["outs"][1]["slots"][3]["order"] == 5 && st["outs"][1]["slots"][3]["bypass"] == true);
+  assert(st["outs"][1]["used"] == 2 + 1 + 1 + 3);
+  // a preset that needs more biquads than the plugin has is refused
+  FakePort port3;
+  MatrixModel small(port3, 2, 8, 6);
+  assert(!small.loadPreset(saved).empty());
+  // a Slot saved before the types existed is a PEQ
+  FakePort port4;
+  MatrixModel c(port4, 2, 8, 4);
+  addSlot(c, "\"freq\":1000");
+  std::string legacy = c.savePreset();
+  for (const char* key : { "\"type\":\"peq\",", "\"slope\":1," })
+  {
+    size_t p = legacy.find(key);
+    if (p != std::string::npos)
+      legacy.erase(p, strlen(key));
+  }
+  FakePort port5;
+  MatrixModel d(port5, 2, 8, 4);
+  assert(d.loadPreset(legacy).empty());
+  assert(std::string(stateOf(d)["outs"][1]["slots"][0]["type"].as<const char*>()) == "peq");
 }
 
 static std::vector<Write> only(const FakePort& port, char type)
@@ -707,6 +972,16 @@ int main()
   deleteRepacksAndFreesTheEnd();
   slotsRoundTripThroughPresetsAndReemit();
   undoRestoresSlots();
+  slotCostPerTypeAndOrder();
+  slotsArepackedInOrder();
+  bypassOfAMultiBiquadSlotKeepsItsStages();
+  typeCoefficientsGiveTheExpectedResponse();
+  slopeChangesTheShelf();
+  slotTypeAndOrderAreValidated();
+  selectableListFollowsTheFreeBudget();
+  freeBudgetOfThreeOffersUpToSixthOrderButterworth();
+  raisingTheOrderBeyondTheBudgetIsRejected();
+  slotTypesRoundTripThroughPresets();
   undoRestoresTheLastAcceptedPatch();
   spdifOutDefaultsAndPairs();
   spdifOutEmitsLeftAndRightMuxWrites();
