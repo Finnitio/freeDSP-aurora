@@ -15,7 +15,7 @@ static const float kPeqGainMin = -24.0f, kPeqGainMax = 24.0f;
 static const float kGainMin = -80.0f;
 static const float kGainMax = 12.0f;
 static const int kNumRoutes = 3;  // Bus 1, Bus 2, Bus 1+2
-static const uint32_t kPortAnalog = 0, kPortUsb = 1, kPortExp = 2, kPortSpdif = 4;
+static const uint32_t kPortAnalog = 0, kPortUsb = 1, kPortExp = 2, kPortSpdif = 4, kPortOut = 5;
 
 //==============================================================================
 /*! Selectable Sources: Analog 1-8, USB 1-8, Exp 1-8, SPDIF L/R. The ESP32 mux
@@ -46,6 +46,38 @@ static std::string sourceName( int n )
   else if( n < 24 ) snprintf( buf, sizeof( buf ), "Exp %d", n - 15 );
   else              snprintf( buf, sizeof( buf ), n == 24 ? "SPDIF L" : "SPDIF R" );
   return buf;
+}
+
+//==============================================================================
+/*! SPDIF out pairs: Analog, USB and Exp pairs 1+2..7+8, SPDIF in, Output pairs. The code is
+ *  that of the left channel; the right one is the next channel of the same port.
+ */
+static const int kNumSpdifSrcPairs = 13;
+
+static uint32_t spdifPairCode( int n )
+{
+  if( n < 4 )  return ( kPortAnalog << 16 ) | ( 2 * n );
+  if( n < 8 )  return ( kPortUsb << 16 ) | ( 2 * ( n - 4 ) );
+  if( n < 12 ) return ( kPortExp << 16 ) | ( 2 * ( n - 8 ) );
+  if( n < 13 ) return ( kPortSpdif << 16 );
+  return ( kPortOut << 16 ) | ( 2 * ( n - 13 ) );
+}
+
+static std::string spdifPairName( int n )
+{
+  char buf[16];
+  if( n < 12 )      snprintf( buf, sizeof( buf ), "%s %d+%d", n < 4 ? "Analog" : n < 8 ? "USB" : "Exp", 2 * ( n % 4 ) + 1, 2 * ( n % 4 ) + 2 );
+  else if( n < 13 ) snprintf( buf, sizeof( buf ), "SPDIF In" );
+  else              snprintf( buf, sizeof( buf ), "Output %d+%d", 2 * ( n - 13 ) + 1, 2 * ( n - 13 ) + 2 );
+  return buf;
+}
+
+static bool spdifPairValid( long sel, int nout )
+{
+  for( int n = 0; n < kNumSpdifSrcPairs + nout / 2; n++ )
+    if( (long)spdifPairCode( n ) == sel )
+      return true;
+  return false;
 }
 
 //==============================================================================
@@ -145,7 +177,7 @@ std::string MatrixModel::applySlot( JsonObject op, Channel& c ) const
 MatrixModel::MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad )
   : port_( port ), nbus_( nbus < MATRIX_MAX_BUS ? nbus : MATRIX_MAX_BUS ),
     nout_( nout < MATRIX_MAX_OUT ? nout : MATRIX_MAX_OUT ), nbiquad_( nbiquad > 0 ? nbiquad : 0 ),
-    dirty_( false ), lastChange_( 0 )
+    spdif_( 0 ), dirty_( false ), lastChange_( 0 )
 {
   undo_.valid = false;
   reset();
@@ -153,6 +185,7 @@ MatrixModel::MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad )
 
 void MatrixModel::reset( void )
 {
+  spdif_ = spdifPairCode( 0 );
   for( int b = 0; b < nbus_; b++ )
   {
     char buf[16];
@@ -199,6 +232,25 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
   const char* kind = patch["ch"].as<const char*>();
   if( !kind )
     return "missing ch";
+  if( strcmp( kind, "spdif" ) == 0 )
+  {
+    if( !patch["sel"].is<long>() || !spdifPairValid( patch["sel"].as<long>(), nout_ ) )
+      return "no such SPDIF out";
+    const uint32_t sel = (uint32_t)patch["sel"].as<long>();
+    undo_.valid = true;
+    undo_.isSpdif = true;
+    undo_.spdif = spdif_;
+    undo_.dirty = dirty_;
+    undo_.lastChange = lastChange_;
+    if( sel != spdif_ )
+    {
+      spdif_ = sel;
+      port_.writeSpdifOut( spdif_, spdif_ + 1 );
+      dirty_ = true;
+      lastChange_ = nowMs;
+    }
+    return "";
+  }
   const bool isBus = ( strcmp( kind, "bus" ) == 0 );
   if( !isBus && strcmp( kind, "out" ) != 0 )
     return "unknown channel kind";
@@ -303,6 +355,7 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
   }
 
   undo_.valid = true;
+  undo_.isSpdif = false;
   undo_.isBus = isBus;
   undo_.idx = idx;
   undo_.ch = prev;
@@ -356,7 +409,10 @@ void MatrixModel::undo( void )
 {
   if( !undo_.valid )
     return;
-  (undo_.isBus ? bus_[undo_.idx] : out_[undo_.idx]) = undo_.ch;
+  if( undo_.isSpdif )
+    spdif_ = undo_.spdif;
+  else
+    (undo_.isBus ? bus_[undo_.idx] : out_[undo_.idx]) = undo_.ch;
   dirty_ = undo_.dirty;
   lastChange_ = undo_.lastChange;
   undo_.valid = false;
@@ -379,6 +435,7 @@ void MatrixModel::applyAll( void )
     port_.writeDelay( o, out_[o].delayBypass ? 0 : out_[o].delay );
     writeStages( MATRIX_OUT, o, out_[o], NULL );
   }
+  port_.writeSpdifOut( spdif_, spdif_ + 1 );
 }
 
 std::string MatrixModel::coeffsJson( const char* ch, int idx ) const
@@ -485,6 +542,16 @@ std::string MatrixModel::stateJson( void ) const
   routes.add( "Bus 1" );
   routes.add( "Bus 2" );
   routes.add( "Bus 1+2" );
+  doc["spdifout"] = (long)spdif_;
+  JsonArray spdifOpts = doc.createNestedArray( "spdifopts" );
+  std::string spdifNames[kNumSpdifSrcPairs + MATRIX_MAX_OUT / 2];
+  for( int n = 0; n < kNumSpdifSrcPairs + nout_ / 2; n++ )
+  {
+    spdifNames[n] = spdifPairName( n );
+    JsonObject s = spdifOpts.createNestedObject();
+    s["n"] = spdifNames[n].c_str();
+    s["v"] = (long)spdifPairCode( n );
+  }
   JsonArray buses = doc.createNestedArray( "buses" );
   for( int b = 0; b < nbus_; b++ )
     putChannel( buses, bus_[b], "source", true );
@@ -498,6 +565,7 @@ std::string MatrixModel::savePreset( void ) const
 {
   DynamicJsonDocument doc( 4096 + 192 * slotCount() );
   doc["v"] = kPresetVersion;
+  doc["spdif"] = (long)spdif_;
   JsonArray buses = doc.createNestedArray( "buses" );
   for( int b = 0; b < nbus_; b++ )
     putChannel( buses, bus_[b], "source", false );
@@ -577,6 +645,14 @@ std::string MatrixModel::loadPreset( const std::string& json )
   if( (int)buses.size() != nbus_ || (int)outs.size() != nout_ )
     return "preset has the wrong channel count";
 
+  uint32_t spdif = spdifPairCode( 0 );  // optional: presets from before the SPDIF out selector have none
+  if( doc.containsKey( "spdif" ) )
+  {
+    if( !doc["spdif"].is<long>() || !spdifPairValid( doc["spdif"].as<long>(), nout_ ) )
+      return "bad spdif";
+    spdif = (uint32_t)doc["spdif"].as<long>();
+  }
+
   Channel nb[MATRIX_MAX_BUS], no[MATRIX_MAX_OUT];
   for( int b = 0; b < nbus_; b++ )
   {
@@ -592,6 +668,7 @@ std::string MatrixModel::loadPreset( const std::string& json )
   }
   for( int b = 0; b < nbus_; b++ ) bus_[b] = nb[b];
   for( int o = 0; o < nout_; o++ ) out_[o] = no[o];
+  spdif_ = spdif;
   undo_.valid = false;
   dirty_ = false;
   applyAll();

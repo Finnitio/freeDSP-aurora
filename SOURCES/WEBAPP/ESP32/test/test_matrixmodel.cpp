@@ -25,6 +25,7 @@ struct FakePort : MatrixPort
   void writePolarity(int out, bool invert) override { w.push_back({ 'p', MATRIX_OUT, out, invert ? 1.0 : 0.0 }); }
   void writeDelay(int out, int samples) override { w.push_back({ 'd', MATRIX_OUT, out, (double)samples }); }
   void waitMs(int ms) override { w.push_back({ 'w', MATRIX_OUT, 0, (double)ms }); }
+  void writeSpdifOut(uint32_t left, uint32_t right) override { w.push_back({ 'o', MATRIX_OUT, (int)right, (double)left }); }
   struct Bq
   {
     MatrixChannelKind kind;
@@ -78,8 +79,8 @@ static void applyAllEmitsFullWriteSet()
   FakePort port;
   MatrixModel m(port, 2, 8);
   m.applyAll();
-  // 2 x (source + gain) + 8 x (route + gain + polarity + delay)
-  assert(port.w.size() == 4 + 32);
+  // 2 x (source + gain) + 8 x (route + gain + polarity + delay) + SPDIF out
+  assert(port.w.size() == 4 + 32 + 1);
   int muted = 0;
   for (size_t i = 0; i < port.w.size(); i++)
     if (port.w[i].type == 'g' && port.w[i].kind == MATRIX_OUT && port.w[i].val == 0.0)
@@ -211,7 +212,7 @@ static void presetRoundTripAndFullWriteSetOnLoad()
   MatrixModel b(port2, 2, 8);
   assert(b.loadPreset(saved).empty());
   assert(b.savePreset() == saved);  // unchanged
-  assert(port2.w.size() == 4 + 32);  // full write set
+  assert(port2.w.size() == 4 + 32 + 1);  // full write set
   bool sawExp = false, sawRoute2 = false;
   for (size_t i = 0; i < port2.w.size(); i++)
   {
@@ -244,7 +245,7 @@ static void loadDefaultsResetsAndWritesEverything()
   port.w.clear();
   m.loadDefaults();
   assert(m.savePreset() == fresh);
-  assert(port.w.size() == 4 + 32);
+  assert(port.w.size() == 4 + 32 + 1);
   assert(!m.dirty());
 }
 
@@ -586,6 +587,74 @@ static void polarityDelayAndBypassRoundTripThroughPresets()
   assert(stateOf(m2)["outs"][4]["polarity"] == true);
 }
 
+static void spdifOutDefaultsAndPairs()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["spdifout"] == 0);  // Analog 1+2
+  // 4 Analog + 4 USB + 4 Exp pairs, SPDIF in, 4 Output pairs
+  JsonArray opts = st["spdifopts"];
+  assert(opts.size() == 17);
+  assert(std::string(opts[0]["n"].as<const char*>()) == "Analog 1+2");
+  assert(std::string(opts[16]["n"].as<const char*>()) == "Output 7+8");
+  assert(opts[16]["v"] == 0x00050006);
+}
+
+static void spdifOutEmitsLeftAndRightMuxWrites()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  // Output 3+4: port 5, channels 2 and 3
+  assert(patch(m, "{\"ch\":\"spdif\",\"sel\":327682}").empty());
+  assert(port.w.size() == 1 && port.w[0].type == 'o');
+  assert((uint32_t)port.w[0].val == 0x00050002 && (uint32_t)port.w[0].idx == 0x00050003);
+  assert(stateOf(m)["spdifout"] == 0x00050002);
+  // a Source pair
+  port.w.clear();
+  assert(patch(m, "{\"ch\":\"spdif\",\"sel\":65540}").empty());  // USB 5+6
+  assert((uint32_t)port.w[0].val == 0x00010004 && (uint32_t)port.w[0].idx == 0x00010005);
+  // unchanged: no write
+  port.w.clear();
+  assert(patch(m, "{\"ch\":\"spdif\",\"sel\":65540}").empty());
+  assert(port.w.empty());
+}
+
+static void spdifOutRejectsOddPairsAndUndoes()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  assert(!patch(m, "{\"ch\":\"spdif\",\"sel\":1}").empty());       // Analog 2+3 is no pair
+  assert(!patch(m, "{\"ch\":\"spdif\",\"sel\":196608}").empty());  // ESP32 mux group is hidden
+  assert(!patch(m, "{\"ch\":\"spdif\"}").empty());
+  assert(port.w.empty() && stateOf(m)["spdifout"] == 0);
+  assert(patch(m, "{\"ch\":\"spdif\",\"sel\":327680}").empty());
+  m.undo();
+  assert(stateOf(m)["spdifout"] == 0);
+}
+
+static void spdifOutSurvivesPresetRoundTrip()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  patch(m, "{\"ch\":\"spdif\",\"sel\":327684}");  // Output 5+6
+  assert(m.dirty());
+  std::string saved = m.savePreset();
+  FakePort port2;
+  MatrixModel m2(port2, 2, 8);
+  assert(m2.loadPreset(saved).empty());
+  assert(m2.savePreset() == saved);
+  assert(stateOf(m2)["spdifout"] == 0x00050004);
+  assert(only(port2, 'o').size() == 1 && (uint32_t)only(port2, 'o')[0].val == 0x00050004);
+  // presets from before the SPDIF out selector load with the default
+  DynamicJsonDocument doc(16384);
+  assert(!deserializeJson(doc, saved));
+  doc.remove("spdif");
+  std::string old;
+  serializeJson(doc, old);
+  assert(m2.loadPreset(old).empty() && stateOf(m2)["spdifout"] == 0);
+}
+
 int main()
 {
   delayMicrosecondsRoundToSamples();
@@ -604,6 +673,10 @@ int main()
   slotsRoundTripThroughPresetsAndReemit();
   undoRestoresSlots();
   undoRestoresTheLastAcceptedPatch();
+  spdifOutDefaultsAndPairs();
+  spdifOutEmitsLeftAndRightMuxWrites();
+  spdifOutRejectsOddPairsAndUndoes();
+  spdifOutSurvivesPresetRoundTrip();
   freshDefaults();
   applyAllEmitsFullWriteSet();
   muteAndGainWrites();

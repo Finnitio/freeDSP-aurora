@@ -34,10 +34,13 @@ button:disabled{opacity:.4}
 <div id="msg"></div>
 <div id="main">
 <div id="presets" class="row"></div>
+<div class="row"><span class="lbl">Vol</span><input type="range" id="vol" class="gain" min="-80" max="0" step="0.5" value="-60" oninput="sendVol(this.value)"><span class="gv" id="volv"></span></div>
 <h2>Buses</h2>
 <div id="buses"></div>
 <h2>Outputs</h2>
 <div id="outs"></div>
+<h2>SPDIF out</h2>
+<div class="row"><select id="spdif" onchange="send('spdif',0,{sel:parseInt(this.value)})"></select></div>
 </div>
 <div id="flt" style="display:none">
 <div class="row"><button class="mute" onclick="closeF()">Back</button><h2 id="ftitle" style="margin:0"></h2></div>
@@ -57,6 +60,19 @@ function load(){
   fetch("/matrix").then(function(r){return r.json();}).then(function(s){if(n<seen)return;seen=n;st=s;draw();})
    .catch(function(){say("Cannot read the matrix");});
   fetch("/preset").then(function(r){return r.json();}).then(function(p){drawPresets(p.pre);});
+  fetch("/mvol").then(function(r){return r.json();}).then(function(v){showVol(v.vol);});
+}
+function showVol(v){
+  document.getElementById("vol").value=v;
+  document.getElementById("volv").textContent=parseFloat(v).toFixed(1)+" dB";
+}
+var vt=0,vp=null;
+function sendVol(v){  // while dragging: at once, then at most every 100 ms with the latest value
+  showVol(v);vp=v;if(vt)return;
+  var go=function(){var x=vp;vp=null;if(x===null){vt=0;return;}
+    fetch("/mvol",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({vol:parseFloat(x)})});
+    vt=setTimeout(go,100);};
+  go();
 }
 function drawPresets(cur){
   var h="";for(var i=0;i<4;i++)h+="<button class='"+(i==cur?"on":"")+"' onclick='preset("+i+")'>"+"ABCD"[i]+"</button>";
@@ -115,6 +131,7 @@ function draw(){
   // do not rebuild under an open select, a name being typed or a slider being dragged
   if(busy("#buses,#outs")){late=true;return;}
   late=false;
+  document.getElementById("spdif").innerHTML=opts(st.spdifopts,st.spdifout,function(s){return s.v;},function(s){return s.n;});
   document.getElementById("buses").innerHTML=b;
   document.getElementById("outs").innerHTML=o;
 }

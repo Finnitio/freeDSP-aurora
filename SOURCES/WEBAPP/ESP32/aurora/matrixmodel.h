@@ -27,6 +27,8 @@ struct MatrixPort
   virtual void writePolarity( int out, bool invert ) = 0;
   /*! Delay block of an Output in whole samples (48 kHz). */
   virtual void writeDelay( int out, int samples ) = 0;
+  /*! SPDIF output mux: left and right codes (port << 16) | channel as in the input select. */
+  virtual void writeSpdifOut( uint32_t left, uint32_t right ) = 0;
   /*! Pauses the write sequence, e.g. until a gain ramp has finished. */
   virtual void waitMs( int ms ) = 0;
   /*! One biquad of a Channel (stage 0 = first). a[3], b[3] as made by the
@@ -58,6 +60,7 @@ public:
    *  gainBypass, and on Outputs only polarity (bool), delayUs (rounded to whole samples, max 40 ms)
    *  and delayBypass,
    *  slot: {"op":"add","freq","q","gain"} | {"op":"del","i"} | {"op":"set","i", freq, q, gain, bypass}}.
+   *  SPDIF out: {"ch":"spdif","sel":code} with the left code of one of the offered pairs (stateJson "spdifopts").
    *  PEQ Slots sit on the Channel's biquads in the order added (stage = Slot index).
    *  Returns "" on success, else the rejection reason; a rejected patch changes nothing. */
   std::string apply( JsonObject patch, uint32_t nowMs );
@@ -126,12 +129,15 @@ private:
   int nbus_, nout_, nbiquad_;
   Channel bus_[MATRIX_MAX_BUS];
   Channel out_[MATRIX_MAX_OUT];
+  uint32_t spdif_;  // left code of the SPDIF out pair
   bool dirty_;
   uint32_t lastChange_;
 
   struct Undo
   {
     bool valid;
+    bool isSpdif;
+    uint32_t spdif;
     bool isBus;
     int idx;
     Channel ch;
