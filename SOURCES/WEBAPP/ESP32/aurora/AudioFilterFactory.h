@@ -58,6 +58,18 @@ public:
   static void makeHighPass( float a[], float b[], const int design, const float fc, const float fs );
   static void makeLowPass( float a[], float b[], const int design, const float fc, const float fs );
   static void makeAllpass( float a[], float b[], const float fc, const float Q, const float fs );
+
+  //============================================================================
+  /*! Butterworth high/low pass of order 1..8 as ceil(order/2) cascaded biquads; the stages
+   *  are 3 coefficients apart in a and b (a[0] = 1, a1/a2 negated). An odd order starts with
+   *  a 1st-order section (b2 = a2 = 0). Returns the number of biquads.
+   */
+  static int makeButterworth( float a[], float b[], const bool high, const int order, const float fc, const float fs );
+
+  /*! Linkwitz-Riley high/low pass of order 2, 4 or 8: two Butterworth filters of order/2 in
+   *  series, order/2 biquads (stage layout as makeButterworth). Returns the number of biquads.
+   */
+  static int makeLinkwitzRiley( float a[], float b[], const bool high, const int order, const float fc, const float fs );
 };
 
 #endif

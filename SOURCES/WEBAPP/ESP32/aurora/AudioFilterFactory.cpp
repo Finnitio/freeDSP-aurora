@@ -1072,3 +1072,64 @@ void AudioFilterFactory::makeAllpass( float a[], float b[], const float fc, cons
   a[2] = (-1.0)*a2;
 }
 
+//==============================================================================
+/*! 1st-order section by the bilinear transform with prewarping (b2 = a2 = 0). */
+static void firstOrderPass( float a[], float b[], const bool high, const float fc, const float fs )
+{
+  const double K = tan( pi * fc / fs );
+  b[0] = ( high ? 1.0 : K ) / ( 1.0 + K );
+  b[1] = ( high ? -1.0 : K ) / ( 1.0 + K );
+  b[2] = 0.0;
+  a[0] = 1.0;
+  a[1] = ( 1.0 - K ) / ( 1.0 + K );
+  a[2] = 0.0;
+}
+
+/*! 2nd-order section of quality Q (RBJ cookbook). */
+static void secondOrderPass( float a[], float b[], const bool high, const double Q, const float fc, const float fs )
+{
+  const double w0 = 2.0 * pi * fc / fs;
+  const double alpha = sin( w0 ) / ( 2.0 * Q );
+  const double a0 = 1.0 + alpha;
+  const double edge = ( high ? 1.0 + cos( w0 ) : 1.0 - cos( w0 ) ) * 0.5;
+  b[0] = edge / a0;
+  b[1] = ( high ? -2.0 * edge : 2.0 * edge ) / a0;
+  b[2] = edge / a0;
+  a[0] = 1.0;
+  a[1] = 2.0 * cos( w0 ) / a0;
+  a[2] = -( 1.0 - alpha ) / a0;
+}
+
+int AudioFilterFactory::makeButterworth( float a[], float b[], const bool high, const int order, const float fc, const float fs )
+{
+  int s = 0;
+  if( order % 2 )
+  {
+    firstOrderPass( a, b, high, fc, fs );
+    s = 1;
+  }
+  for( int k = order / 2; k >= 1; k-- )  // the pole pairs, lowest Q first
+  {
+    secondOrderPass( a + 3 * s, b + 3 * s, high, 1.0 / ( 2.0 * sin( pi * ( 2 * k - 1 ) / ( 2.0 * order ) ) ), fc, fs );
+    s++;
+  }
+  return s;
+}
+
+int AudioFilterFactory::makeLinkwitzRiley( float a[], float b[], const bool high, const int order, const float fc, const float fs )
+{
+  if( order == 2 )  // (s+w)^2: a single biquad with Q = 0.5
+  {
+    secondOrderPass( a, b, high, 0.5, fc, fs );
+    return 1;
+  }
+  const int n = makeButterworth( a, b, high, order / 2, fc, fs );
+  for( int s = 0; s < n; s++ )  // the same Butterworth twice
+    for( int k = 0; k < 3; k++ )
+    {
+      a[3 * ( n + s ) + k] = a[3 * s + k];
+      b[3 * ( n + s ) + k] = b[3 * s + k];
+    }
+  return 2 * n;
+}
+
