@@ -10,7 +10,7 @@
 
 struct Write
 {
-  char type;  // 'g' gain, 'r' route, 's' source
+  char type;  // 'g' gain, 'r' route, 's' source, 'p' polarity (0/1), 'd' delay samples
   MatrixChannelKind kind;
   int idx;
   double val;
@@ -22,6 +22,8 @@ struct FakePort : MatrixPort
   void writeGain(MatrixChannelKind kind, int idx, double linear) override { w.push_back({ 'g', kind, idx, linear }); }
   void writeRoute(int out, int route) override { w.push_back({ 'r', MATRIX_OUT, out, (double)route }); }
   void writeSource(int bus, uint32_t sel) override { w.push_back({ 's', MATRIX_BUS, bus, (double)sel }); }
+  void writePolarity(int out, bool invert) override { w.push_back({ 'p', MATRIX_OUT, out, invert ? 1.0 : 0.0 }); }
+  void writeDelay(int out, int samples) override { w.push_back({ 'd', MATRIX_OUT, out, (double)samples }); }
   struct Bq
   {
     MatrixChannelKind kind;
@@ -45,7 +47,7 @@ static std::string patch(MatrixModel& m, const char* json, uint32_t now = 0)
 
 static DynamicJsonDocument stateOf(const MatrixModel& m)
 {
-  DynamicJsonDocument doc(8192);
+  DynamicJsonDocument doc(16384);
   std::string s = m.stateJson();
   assert(!deserializeJson(doc, s));
   return doc;
@@ -75,8 +77,8 @@ static void applyAllEmitsFullWriteSet()
   FakePort port;
   MatrixModel m(port, 2, 8);
   m.applyAll();
-  // 2 x (source + gain) + 8 x (route + gain)
-  assert(port.w.size() == 4 + 16);
+  // 2 x (source + gain) + 8 x (route + gain + polarity + delay)
+  assert(port.w.size() == 4 + 32);
   int muted = 0;
   for (size_t i = 0; i < port.w.size(); i++)
     if (port.w[i].type == 'g' && port.w[i].kind == MATRIX_OUT && port.w[i].val == 0.0)
@@ -204,7 +206,7 @@ static void presetRoundTripAndFullWriteSetOnLoad()
   MatrixModel b(port2, 2, 8);
   assert(b.loadPreset(saved).empty());
   assert(b.savePreset() == saved);  // unchanged
-  assert(port2.w.size() == 4 + 16);  // full write set
+  assert(port2.w.size() == 4 + 32);  // full write set
   bool sawExp = false, sawRoute2 = false;
   for (size_t i = 0; i < port2.w.size(); i++)
   {
@@ -237,7 +239,7 @@ static void loadDefaultsResetsAndWritesEverything()
   port.w.clear();
   m.loadDefaults();
   assert(m.savePreset() == fresh);
-  assert(port.w.size() == 4 + 16);
+  assert(port.w.size() == 4 + 32);
   assert(!m.dirty());
 }
 
@@ -458,8 +460,135 @@ static void undoRestoresSlots()
   assert(m.savePreset() == before);
 }
 
+static std::vector<Write> only(const FakePort& port, char type)
+{
+  std::vector<Write> r;
+  for (size_t i = 0; i < port.w.size(); i++)
+    if (port.w[i].type == type)
+      r.push_back(port.w[i]);
+  return r;
+}
+
+static void delayMicrosecondsRoundToSamples()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":3,\"delayUs\":1000}").empty());
+  std::vector<Write> d = only(port, 'd');
+  assert(d.size() == 1 && d[0].idx == 3 && d[0].val == 48);
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["outs"][3]["delaySamples"] == 48);
+  assert(near(st["outs"][3]["delayUs"].as<double>(), 1000.0));
+  assert(near(st["outs"][3]["delayMm"].as<double>(), 343.0));
+  assert(st["outs"][3]["delayBypass"] == false);
+
+  // 100 us = 4.8 samples -> 5 samples = 104.1666 us
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":3,\"delayUs\":100}").empty());
+  st = stateOf(m);
+  assert(st["outs"][3]["delaySamples"] == 5);
+  assert(std::fabs(st["outs"][3]["delayUs"].as<double>() - 104.1667) < 1e-3);
+  assert(std::fabs(st["outs"][3]["delayMm"].as<double>() - 35.729) < 1e-2);
+  assert(st["delaymax"] == 1920);
+}
+
+static void delayBoundaryIs40ms()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"delayUs\":40000}").empty());
+  assert(only(port, 'd').back().val == 1920);
+  port.w.clear();
+  assert(!patch(m, "{\"ch\":\"out\",\"idx\":0,\"delayUs\":40021}").empty());  // 1921 samples
+  assert(!patch(m, "{\"ch\":\"out\",\"idx\":0,\"delayUs\":-1}").empty());
+  assert(!patch(m, "{\"ch\":\"out\",\"idx\":0,\"delayUs\":\"x\"}").empty());
+  assert(port.w.empty());
+  assert(stateOf(m)["outs"][0]["delaySamples"] == 1920);
+}
+
+static void delayBypassWritesZeroAndKeepsValue()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  patch(m, "{\"ch\":\"out\",\"idx\":1,\"delayUs\":1000}");
+  port.w.clear();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"delayBypass\":true}").empty());
+  assert(only(port, 'd').size() == 1 && only(port, 'd')[0].val == 0);
+  assert(stateOf(m)["outs"][1]["delaySamples"] == 48);
+  // editing while bypassed stores the value but writes nothing
+  port.w.clear();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"delayUs\":2000}").empty());
+  assert(port.w.empty());
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"delayBypass\":false}").empty());
+  assert(only(port, 'd').size() == 1 && only(port, 'd')[0].val == 96);
+}
+
+static void polarityWritesAndIsOutputsOnly()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":5,\"polarity\":true}").empty());
+  assert(port.w.size() == 1 && port.w[0].type == 'p' && port.w[0].idx == 5 && port.w[0].val == 1.0);
+  assert(stateOf(m)["outs"][5]["polarity"] == true);
+  port.w.clear();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":5,\"polarity\":true}").empty());
+  assert(port.w.empty());
+  assert(!patch(m, "{\"ch\":\"out\",\"idx\":5,\"polarity\":1}").empty());
+
+  // Buses have neither polarity nor delay
+  assert(!patch(m, "{\"ch\":\"bus\",\"idx\":0,\"polarity\":true}").empty());
+  assert(!patch(m, "{\"ch\":\"bus\",\"idx\":0,\"delayUs\":100}").empty());
+  assert(!patch(m, "{\"ch\":\"bus\",\"idx\":0,\"delayBypass\":true}").empty());
+  assert(port.w.empty());
+  DynamicJsonDocument st = stateOf(m);
+  assert(!st["buses"][0].containsKey("polarity") && !st["buses"][0].containsKey("delaySamples"));
+}
+
+static void gainBypassWritesUnityAndKeepsGain()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  patch(m, "{\"ch\":\"out\",\"idx\":2,\"mute\":false,\"gain\":-6}");
+  port.w.clear();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":2,\"gainBypass\":true}").empty());
+  assert(port.w.size() == 1 && port.w[0].type == 'g' && near(port.w[0].val, 1.0));
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["outs"][2]["gainBypass"] == true && st["outs"][2]["gain"] == -6);
+  // mute wins over bypass
+  port.w.clear();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":2,\"mute\":true}").empty());
+  assert(port.w.size() == 1 && port.w[0].val == 0.0);
+  assert(patch(m, "{\"ch\":\"bus\",\"idx\":1,\"gainBypass\":true}").empty());  // Buses have gain bypass too
+  assert(!patch(m, "{\"ch\":\"bus\",\"idx\":1,\"gainBypass\":3}").empty());
+}
+
+static void polarityDelayAndBypassRoundTripThroughPresets()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  patch(m, "{\"ch\":\"out\",\"idx\":4,\"polarity\":true,\"delayUs\":1000,\"delayBypass\":true,\"gainBypass\":true}");
+  std::string saved = m.savePreset();
+  FakePort port2;
+  MatrixModel m2(port2, 2, 8);
+  assert(m2.loadPreset(saved).empty());
+  assert(m2.savePreset() == saved);
+  assert(only(port2, 'p').size() == 8 && only(port2, 'd').size() == 8);
+  assert(only(port2, 'p')[4].val == 1.0 && only(port2, 'd')[4].val == 0);
+  DynamicJsonDocument st = stateOf(m2);
+  assert(st["outs"][4]["delaySamples"] == 48 && st["outs"][4]["delayBypass"] == true && st["outs"][4]["gainBypass"] == true);
+  // undo restores the new fields
+  patch(m2, "{\"ch\":\"out\",\"idx\":4,\"polarity\":false}");
+  m2.undo();
+  assert(stateOf(m2)["outs"][4]["polarity"] == true);
+}
+
 int main()
 {
+  delayMicrosecondsRoundToSamples();
+  delayBoundaryIs40ms();
+  delayBypassWritesZeroAndKeepsValue();
+  polarityWritesAndIsOutputsOnly();
+  gainBypassWritesUnityAndKeepsGain();
+  polarityDelayAndBypassRoundTripThroughPresets();
   addPeqWritesItsBiquad();
   peqCoefficientsMatchTheDesign();
   budgetRejectsAndAddDisabled();

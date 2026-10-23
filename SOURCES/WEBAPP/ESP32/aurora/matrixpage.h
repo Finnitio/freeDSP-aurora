@@ -42,6 +42,7 @@ button:disabled{opacity:.4}
 <div id="flt" style="display:none">
 <div class="row"><button class="mute" onclick="closeF()">Back</button><h2 id="ftitle" style="margin:0"></h2></div>
 <canvas id="plot" width="600" height="200"></canvas>
+<div id="top"></div>
 <div id="budget"></div>
 <div id="slots"></div>
 <button id="add" class="wide" onclick="addSlot()">+ add</button>
@@ -148,14 +149,35 @@ function slotSend(i,key,v){
 function addSlot(){send(view.ch,view.idx,{slot:{op:"add"}});}
 function delSlot(i){send(view.ch,view.idx,{slot:{op:"del",i:i}});}
 function bypass(i,b){send(view.ch,view.idx,{slot:{op:"set",i:i,bypass:b}});}
+function topGain(v){
+  document.getElementById("tgv").textContent=v+" dB";
+  live("tg"+view.ch+view.idx,view.ch,view.idx,{gain:parseFloat(v)});
+}
+function sendTop(f){send(view.ch,view.idx,f);}
+// gain block (all Channels), polarity and delay (Outputs only)
+function topHtml(c){
+  var h="<div class='slot'><div class='row'><b class='name'>Gain</b>"
+   +"<button class='mute"+(c.gainBypass?" on":"")+"' onclick='sendTop({gainBypass:"+!c.gainBypass+"})'>Bypass</button></div>"
+   +"<div class='row'><input type='range' class='gain' min='"+st.gainmin+"' max='"+st.gainmax+"' step='0.5' value='"+c.gain+"' oninput='topGain(this.value)' onchange='sendTop({gain:parseFloat(this.value)})'>"
+   +"<span class='gv' id='tgv'>"+c.gain+" dB</span></div></div>";
+  if(view.ch!="out")return h;
+  h+="<div class='slot'><div class='row'><b class='name'>Polarity</b>"
+   +"<button class='mute"+(c.polarity?" on":"")+"' onclick='sendTop({polarity:"+!c.polarity+"})'>"+(c.polarity?"Inverted":"Normal")+"</button></div></div>";
+  h+="<div class='slot'><div class='row'><b class='name'>Delay</b>"
+   +"<button class='mute"+(c.delayBypass?" on":"")+"' onclick='sendTop({delayBypass:"+!c.delayBypass+"})'>Bypass</button></div>"
+   +"<div class='row'><input type='number' class='name' min='0' max='"+Math.round(st.delaymax*1e6/48000)+"' step='1' value='"+Math.round(c.delayUs)+"' onchange='sendTop({delayUs:parseFloat(this.value)})'><span>&micro;s</span></div>"
+   +"<div class='row'>Applied: "+c.delayUs.toFixed(1)+" &micro;s = "+c.delaySamples+" samples = "+c.delayMm.toFixed(1)+" mm"+(c.delayBypass?" (bypassed)":"")+"</div></div>";
+  return h;
+}
 function drawF(){
   var c=chan();
   document.getElementById("ftitle").textContent=c.name;
   document.getElementById("budget").textContent="Biquads: "+c.used+" of "+c.budget+" used, "+c.free+" free";
   document.getElementById("add").disabled=c.addable.indexOf("peq")<0;
   coeffs();
-  if(busy("#slots")){late=true;return;}
+  if(busy("#slots,#top")){late=true;return;}
   late=false;
+  document.getElementById("top").innerHTML=topHtml(c);
   var h="",p=st.peq;
   c.slots.forEach(function(s,i){
     h+="<div class='slot'><div class='row'><b class='name'>PEQ "+(i+1)+"</b>"

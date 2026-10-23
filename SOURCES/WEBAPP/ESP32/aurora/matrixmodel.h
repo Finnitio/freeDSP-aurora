@@ -23,6 +23,10 @@ struct MatrixPort
   virtual void writeRoute( int out, int route ) = 0;
   /*! Source mux of a Bus; sel = (port << 16) | channel as in the input select. */
   virtual void writeSource( int bus, uint32_t sel ) = 0;
+  /*! Polarity block of an Output. */
+  virtual void writePolarity( int out, bool invert ) = 0;
+  /*! Delay block of an Output in whole samples (48 kHz). */
+  virtual void writeDelay( int out, int samples ) = 0;
   /*! One biquad of a Channel (stage 0 = first). a[3], b[3] as made by the
    *  AudioFilterFactory (a[0] = 1, a1/a2 already negated for the DSP). */
   virtual void writeBiquad( MatrixChannelKind kind, int idx, int stage, const float a[3], const float b[3] ) = 0;
@@ -37,6 +41,7 @@ struct MatrixCoef
 #define MATRIX_MAX_BUS 2
 #define MATRIX_MAX_OUT 8
 #define MATRIX_NAME_LEN 16
+#define MATRIX_MAX_DELAY_SAMPLES 1920  // 40 ms at 48 kHz
 #define MATRIX_SAVE_DELAY_MS 2000
 
 class MatrixModel
@@ -47,6 +52,8 @@ public:
   MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad = 0 );
 
   /*! Applies a patch {"ch":"bus"|"out","idx":n, name, mute, gain, source (Bus), route (Output),
+   *  gainBypass, and on Outputs only polarity (bool), delayUs (rounded to whole samples, max 40 ms)
+   *  and delayBypass,
    *  slot: {"op":"add","freq","q","gain"} | {"op":"del","i"} | {"op":"set","i", freq, q, gain, bypass}}.
    *  PEQ Slots sit on the Channel's biquads in the order added (stage = Slot index).
    *  Returns "" on success, else the rejection reason; a rejected patch changes nothing. */
@@ -94,7 +101,11 @@ private:
     std::string name;
     bool mute;
     float gain;  // dB
-    int sel;     // Bus: Source code; Output: route
+    bool gainBypass;
+    bool polarity;     // Outputs only
+    int delay;         // samples, Outputs only
+    bool delayBypass;  // Outputs only
+    int sel;    // Bus: Source code; Output: route
     std::vector<Slot> slots;
   };
 

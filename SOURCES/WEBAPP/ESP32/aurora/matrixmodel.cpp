@@ -160,6 +160,10 @@ void MatrixModel::reset( void )
     bus_[b].name = buf;
     bus_[b].mute = false;
     bus_[b].gain = 0.0f;
+    bus_[b].gainBypass = false;
+    bus_[b].polarity = false;
+    bus_[b].delay = 0;
+    bus_[b].delayBypass = false;
     bus_[b].sel = (int)sourceCode( b );  // Analog 1, Analog 2
   }
   for( int o = 0; o < nout_; o++ )
@@ -169,6 +173,10 @@ void MatrixModel::reset( void )
     out_[o].name = buf;
     out_[o].mute = true;
     out_[o].gain = 0.0f;
+    out_[o].gainBypass = false;
+    out_[o].polarity = false;
+    out_[o].delay = 0;
+    out_[o].delayBypass = false;
     out_[o].sel = o % 2;
   }
 }
@@ -183,9 +191,8 @@ void MatrixModel::loadDefaults( void )
 
 double MatrixModel::linear( const Channel& c ) const
 {
-  return c.mute ? 0.0 : pow( 10.0, c.gain / 20.0 );
+  return c.mute ? 0.0 : c.gainBypass ? 1.0 : pow( 10.0, c.gain / 20.0 );
 }
-
 //==============================================================================
 std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
 {
@@ -234,6 +241,41 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
       if( !( g >= kGainMin && g <= kGainMax ) )
         return "gain out of range";
       next.gain = g;
+    }
+    else if( strcmp( key, "gainBypass" ) == 0 )
+    {
+      if( !v.is<bool>() )
+        return "gainBypass must be true or false";
+      next.gainBypass = v.as<bool>();
+    }
+    else if( strcmp( key, "polarity" ) == 0 || strcmp( key, "delayUs" ) == 0 || strcmp( key, "delayBypass" ) == 0 )
+    {
+      if( isBus )
+        return std::string( "buses have no " ) + key;
+      if( key[0] == 'p' )
+      {
+        if( !v.is<bool>() )
+          return "polarity must be true or false";
+        next.polarity = v.as<bool>();
+      }
+      else if( key[5] == 'B' )
+      {
+        if( !v.is<bool>() )
+          return "delayBypass must be true or false";
+        next.delayBypass = v.as<bool>();
+      }
+      else
+      {
+        if( !v.is<float>() )
+          return "delayUs must be a number";
+        const double us = v.as<double>();
+        if( !( us >= 0.0 && us <= 1e6 ) )
+          return "delay out of range";
+        const int samples = (int)floor( us * kSampleRate / 1e6 + 0.5 );
+        if( samples > MATRIX_MAX_DELAY_SAMPLES )
+          return "delay out of range";
+        next.delay = samples;
+      }
     }
     else if( strcmp( key, "slot" ) == 0 )
     {
@@ -288,10 +330,20 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
     }
   }
 
+  if( !isBus )
+  {
+    if( next.polarity != prev.polarity )
+      port_.writePolarity( idx, next.polarity );
+    if( ( next.delayBypass ? 0 : next.delay ) != ( prev.delayBypass ? 0 : prev.delay ) )
+      port_.writeDelay( idx, next.delayBypass ? 0 : next.delay );
+  }
+
   if( slotChanged )
     writeStages( ck, idx, next, &prev );
 
-  if( slotChanged || next.name != prev.name || next.mute != prev.mute || next.gain != prev.gain || switched )
+  if( slotChanged || next.name != prev.name || next.mute != prev.mute || next.gain != prev.gain || switched
+      || next.gainBypass != prev.gainBypass || next.polarity != prev.polarity || next.delay != prev.delay
+      || next.delayBypass != prev.delayBypass )
   {
     dirty_ = true;
     lastChange_ = nowMs;
@@ -322,6 +374,8 @@ void MatrixModel::applyAll( void )
   {
     port_.writeRoute( o, out_[o].sel );
     port_.writeGain( MATRIX_OUT, o, linear( out_[o] ) );
+    port_.writePolarity( o, out_[o].polarity );
+    port_.writeDelay( o, out_[o].delayBypass ? 0 : out_[o].delay );
     writeStages( MATRIX_OUT, o, out_[o], NULL );
   }
 }
@@ -360,6 +414,18 @@ void MatrixModel::putChannel( JsonArray arr, const Channel& c, const char* selKe
   o[selKey] = c.sel;
   o["mute"] = c.mute;
   o["gain"] = c.gain;
+  o["gainBypass"] = c.gainBypass;
+  if( strcmp( selKey, "route" ) == 0 )  // Outputs only
+  {
+    o["polarity"] = c.polarity;
+    o["delaySamples"] = c.delay;
+    o["delayBypass"] = c.delayBypass;
+    if( withLimits )
+    {
+      o["delayUs"] = c.delay * 1e6 / kSampleRate;
+      o["delayMm"] = c.delay * 343000.0 / kSampleRate;
+    }
+  }
   JsonArray slots = o.createNestedArray( "slots" );
   for( size_t i = 0; i < c.slots.size(); i++ )
   {
@@ -391,12 +457,13 @@ static std::string toString( const JsonDocument& doc )
 
 std::string MatrixModel::stateJson( void ) const
 {
-  DynamicJsonDocument doc( 8192 + 192 * slotCount() );
+  DynamicJsonDocument doc( 12288 + 192 * slotCount() );
   doc["nbus"] = nbus_;
   doc["nout"] = nout_;
   doc["nbiquad"] = nbiquad_;
   doc["gainmin"] = kGainMin;
   doc["gainmax"] = kGainMax;
+  doc["delaymax"] = MATRIX_MAX_DELAY_SAMPLES;
   JsonObject peq = doc.createNestedObject( "peq" );
   peq["fmin"] = kFreqMin;
   peq["fmax"] = kFreqMax;
@@ -459,6 +526,19 @@ std::string MatrixModel::readChannel( JsonObject o, bool isBus, Channel& c ) con
     if( !o["route"].is<int>() || o["route"].as<int>() < 0 || o["route"].as<int>() >= kNumRoutes )
       return "bad route";
     c.sel = o["route"].as<int>();
+  }
+  // optional: presets from before polarity, delay and bypass have none
+  c.gainBypass = o["gainBypass"] | false;
+  c.polarity = false;
+  c.delay = 0;
+  c.delayBypass = false;
+  if( !isBus )
+  {
+    c.polarity = o["polarity"] | false;
+    c.delay = o["delaySamples"] | 0;
+    c.delayBypass = o["delayBypass"] | false;
+    if( c.delay < 0 || c.delay > MATRIX_MAX_DELAY_SAMPLES )
+      return "bad delay";
   }
   c.slots.clear();
   JsonArray slots = o["slots"];  // optional: presets from before the Filter row have none

@@ -10,7 +10,7 @@
 
 namespace
 {
-enum OpType { OP_GAIN, OP_ROUTE, OP_SOURCE, OP_BIQUAD };
+enum OpType { OP_GAIN, OP_ROUTE, OP_SOURCE, OP_BIQUAD, OP_POLARITY, OP_DELAY };
 
 struct Op
 {
@@ -18,7 +18,7 @@ struct Op
   MatrixChannelKind kind;
   int idx;
   double gain;   // OP_GAIN: linear
-  uint32_t sel;  // OP_ROUTE: route, OP_SOURCE: source code, OP_BIQUAD: stage
+  uint32_t sel;  // OP_ROUTE: route, OP_SOURCE: source code, OP_BIQUAD: stage, OP_POLARITY: 0/1, OP_DELAY: samples
   float a[3], b[3];  // OP_BIQUAD
 };
 
@@ -30,6 +30,8 @@ public:
   void writeGain( MatrixChannelKind kind, int idx, double linear ) override { ops.push_back( { OP_GAIN, kind, idx, linear, 0, {}, {} } ); }
   void writeRoute( int out, int route ) override { ops.push_back( { OP_ROUTE, MATRIX_OUT, out, 0.0, (uint32_t)route, {}, {} } ); }
   void writeSource( int bus, uint32_t sel ) override { ops.push_back( { OP_SOURCE, MATRIX_BUS, bus, 0.0, sel, {}, {} } ); }
+  void writePolarity( int out, bool invert ) override { ops.push_back( { OP_POLARITY, MATRIX_OUT, out, 0.0, invert ? 1u : 0u, {}, {} } ); }
+  void writeDelay( int out, int samples ) override { ops.push_back( { OP_DELAY, MATRIX_OUT, out, 0.0, (uint32_t)samples, {}, {} } ); }
   void writeBiquad( MatrixChannelKind kind, int idx, int stage, const float a[3], const float b[3] ) override
   {
     Op op = { OP_BIQUAD, kind, idx, 0.0, (uint32_t)stage, {}, {} };
@@ -66,6 +68,10 @@ void execOps( const std::vector<Op>& ops )
       writeWord( op.kind == MATRIX_BUS ? matrixMeta.busgain[op.idx] : matrixMeta.outgain[op.idx], convertTo824( op.gain ) );
     else if( op.type == OP_ROUTE )
       writeWord( matrixMeta.outroute[op.idx], op.sel );
+    else if( op.type == OP_POLARITY )
+      writeWord( matrixMeta.outpol[op.idx], op.sel );
+    else if( op.type == OP_DELAY )
+      writeWord( matrixMeta.outdly[op.idx], op.sel );
     else if( op.type == OP_BIQUAD )
     {
       const uint16_t* base = ( op.kind == MATRIX_BUS ? matrixMeta.busbiquad : matrixMeta.outbiquad );
