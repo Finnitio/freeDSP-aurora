@@ -10,7 +10,7 @@
 
 namespace
 {
-enum OpType { OP_GAIN, OP_ROUTE, OP_SOURCE, OP_BIQUAD, OP_POLARITY, OP_DELAY };
+enum OpType { OP_GAIN, OP_ROUTE, OP_SOURCE, OP_BIQUAD, OP_POLARITY, OP_DELAY, OP_WAIT };
 
 struct Op
 {
@@ -32,6 +32,7 @@ public:
   void writeSource( int bus, uint32_t sel ) override { ops.push_back( { OP_SOURCE, MATRIX_BUS, bus, 0.0, sel, {}, {} } ); }
   void writePolarity( int out, bool invert ) override { ops.push_back( { OP_POLARITY, MATRIX_OUT, out, 0.0, invert ? 1u : 0u, {}, {} } ); }
   void writeDelay( int out, int samples ) override { ops.push_back( { OP_DELAY, MATRIX_OUT, out, 0.0, (uint32_t)samples, {}, {} } ); }
+  void waitMs( int ms ) override { ops.push_back( { OP_WAIT, MATRIX_OUT, 0, 0.0, (uint32_t)ms, {}, {} } ); }
   void writeBiquad( MatrixChannelKind kind, int idx, int stage, const float a[3], const float b[3] ) override
   {
     Op op = { OP_BIQUAD, kind, idx, 0.0, (uint32_t)stage, {}, {} };
@@ -68,6 +69,8 @@ void execOps( const std::vector<Op>& ops )
       writeWord( op.kind == MATRIX_BUS ? matrixMeta.busgain[op.idx] : matrixMeta.outgain[op.idx], convertTo824( op.gain ) );
     else if( op.type == OP_ROUTE )
       writeWord( matrixMeta.outroute[op.idx], op.sel );
+    else if( op.type == OP_WAIT )
+      vTaskDelay( pdMS_TO_TICKS( op.sel ) );  // runs on the I2C worker, never in a web handler
     else if( op.type == OP_POLARITY )
       writeWord( matrixMeta.outpol[op.idx], op.sel );
     else if( op.type == OP_DELAY )

@@ -317,6 +317,7 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
   {
     // ramp this Channel down, switch, ramp up; the others keep playing
     port_.writeGain( ck, idx, 0.0 );
+    port_.waitMs( MATRIX_RAMP_MS );
     if( isBus ) port_.writeSource( idx, (uint32_t)next.sel ); else port_.writeRoute( idx, next.sel );
     port_.writeGain( ck, idx, lin );
   }

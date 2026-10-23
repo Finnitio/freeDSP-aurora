@@ -24,6 +24,7 @@ struct FakePort : MatrixPort
   void writeSource(int bus, uint32_t sel) override { w.push_back({ 's', MATRIX_BUS, bus, (double)sel }); }
   void writePolarity(int out, bool invert) override { w.push_back({ 'p', MATRIX_OUT, out, invert ? 1.0 : 0.0 }); }
   void writeDelay(int out, int samples) override { w.push_back({ 'd', MATRIX_OUT, out, (double)samples }); }
+  void waitMs(int ms) override { w.push_back({ 'w', MATRIX_OUT, 0, (double)ms }); }
   struct Bq
   {
     MatrixChannelKind kind;
@@ -130,10 +131,12 @@ static void routeChangeRampsDownSwitchesRampsUp()
   patch(m, "{\"ch\":\"out\",\"idx\":1,\"mute\":false,\"gain\":-6}");
   port.w.clear();
   assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"route\":2}").empty());
-  assert(port.w.size() == 3);
+  // down, wait for the slew to finish, switch, up: only this Output is touched
+  assert(port.w.size() == 4);
   assert(port.w[0].type == 'g' && port.w[0].idx == 1 && port.w[0].val == 0.0);
-  assert(port.w[1].type == 'r' && port.w[1].idx == 1 && port.w[1].val == 2);
-  assert(port.w[2].type == 'g' && port.w[2].idx == 1 && near(port.w[2].val, std::pow(10.0, -6.0 / 20)));
+  assert(port.w[1].type == 'w' && port.w[1].val >= 20);
+  assert(port.w[2].type == 'r' && port.w[2].idx == 1 && port.w[2].val == 2);
+  assert(port.w[3].type == 'g' && port.w[3].idx == 1 && near(port.w[3].val, std::pow(10.0, -6.0 / 20)));
 
   // muted Output: just switch
   port.w.clear();
@@ -151,10 +154,12 @@ static void sourceChangeRampsTheBus()
   FakePort port;
   MatrixModel m(port, 2, 8);
   assert(patch(m, "{\"ch\":\"bus\",\"idx\":1,\"source\":65538}").empty());  // USB 3
-  assert(port.w.size() == 3);
-  assert(port.w[0].type == 'g' && port.w[0].kind == MATRIX_BUS && port.w[0].val == 0.0);
-  assert(port.w[1].type == 's' && port.w[1].idx == 1 && port.w[1].val == 65538);
-  assert(port.w[2].type == 'g' && port.w[2].kind == MATRIX_BUS && near(port.w[2].val, 1.0));
+  // the Bus ramps, not the Outputs it feeds
+  assert(port.w.size() == 4);
+  assert(port.w[0].type == 'g' && port.w[0].kind == MATRIX_BUS && port.w[0].idx == 1 && port.w[0].val == 0.0);
+  assert(port.w[1].type == 'w' && port.w[1].val >= 20);
+  assert(port.w[2].type == 's' && port.w[2].idx == 1 && port.w[2].val == 65538);
+  assert(port.w[3].type == 'g' && port.w[3].kind == MATRIX_BUS && port.w[3].idx == 1 && near(port.w[3].val, 1.0));
 }
 
 static void invalidPatchesAreRejectedWithoutSideEffects()

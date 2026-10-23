@@ -27,6 +27,8 @@ struct MatrixPort
   virtual void writePolarity( int out, bool invert ) = 0;
   /*! Delay block of an Output in whole samples (48 kHz). */
   virtual void writeDelay( int out, int samples ) = 0;
+  /*! Pauses the write sequence, e.g. until a gain ramp has finished. */
+  virtual void waitMs( int ms ) = 0;
   /*! One biquad of a Channel (stage 0 = first). a[3], b[3] as made by the
    *  AudioFilterFactory (a[0] = 1, a1/a2 already negated for the DSP). */
   virtual void writeBiquad( MatrixChannelKind kind, int idx, int stage, const float a[3], const float b[3] ) = 0;
@@ -43,6 +45,7 @@ struct MatrixCoef
 #define MATRIX_NAME_LEN 16
 #define MATRIX_MAX_DELAY_SAMPLES 1920  // 40 ms at 48 kHz
 #define MATRIX_SAVE_DELAY_MS 2000
+#define MATRIX_RAMP_MS 20  // gain slew to settle before a route or Source switch
 
 class MatrixModel
 {
