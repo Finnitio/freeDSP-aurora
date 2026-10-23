@@ -1858,6 +1858,16 @@ void setupWebserver (void)
     // The matrix page is part of the firmware; the model runs here, only the DSP writes are queued.
     server.on( "/",       HTTP_GET, [](AsyncWebServerRequest *request ) { request->send( 200, "text/html", matrixpage_html ); });
     server.on( "/matrix", HTTP_GET, [](AsyncWebServerRequest *request ) { request->send( 200, "application/json", matrixState().c_str() ); });
+    server.on( "/matrix/coeffs", HTTP_GET, [](AsyncWebServerRequest *request )
+    {
+      std::string reply;
+      if( request->hasParam( "ch" ) && request->hasParam( "idx" ) )
+        reply = matrixCoeffs( request->getParam( "ch" )->value().c_str(), request->getParam( "idx" )->value().toInt() );
+      if( reply.empty() )
+        request->send( 400, "text/plain", "no such channel" );
+      else
+        request->send( 200, "application/json", reply.c_str() );
+    });
     server.on( "/matrix", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
     {
       std::shared_ptr<DynamicJsonDocument> doc = readJsonBody( request, data, len, index, total, 1024 );

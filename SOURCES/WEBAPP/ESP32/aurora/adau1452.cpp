@@ -97,6 +97,11 @@ static void writeBiquad( uint16_t addr, const float* a, const float* b )
   safeloadBiquad( port, safeloadCfg, addr, words );
 }
 
+void ADAU1452_WRITE_BIQUAD( uint16_t addr, const float* a, const float* b )
+{
+  writeBiquad( addr, a, b );
+}
+
 //==============================================================================
 /*! Enables or disables the volume potentiometer
  *

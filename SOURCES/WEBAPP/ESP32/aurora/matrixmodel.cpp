@@ -3,8 +3,15 @@
 #include <stdio.h>
 
 #include "matrixmodel.h"
+#include "AudioFilterFactory.h"
+
+static std::string toString( const JsonDocument& doc );
 
 static const int kPresetVersion = 1;
+static const float kSampleRate = 48000.0f;
+static const float kFreqMin = 20.0f, kFreqMax = 20000.0f;
+static const float kQMin = 0.1f, kQMax = 20.0f;
+static const float kPeqGainMin = -24.0f, kPeqGainMax = 24.0f;
 static const float kGainMin = -80.0f;
 static const float kGainMax = 12.0f;
 static const int kNumRoutes = 3;  // Bus 1, Bus 2, Bus 1+2
@@ -42,9 +49,103 @@ static std::string sourceName( int n )
 }
 
 //==============================================================================
-MatrixModel::MatrixModel( MatrixPort& port, int nbus, int nout )
+int MatrixModel::slotCount( void ) const
+{
+  int n = 0;
+  for( int b = 0; b < nbus_; b++ ) n += (int)bus_[b].slots.size();
+  for( int o = 0; o < nout_; o++ ) n += (int)out_[o].slots.size();
+  return n;
+}
+
+//==============================================================================
+static MatrixCoef passthroughCoef( void )
+{
+  MatrixCoef c ={ { 1, 0, 0 }, { 1, 0, 0 } };
+  return c;
+}
+
+/*! One biquad per Slot, in the order of the Slots; unused and bypassed stages are passthrough. */
+void MatrixModel::stages( const Channel& c, std::vector<Coef>& out ) const
+{
+  out.assign( nbiquad_, passthroughCoef() );
+  for( size_t i = 0; i < c.slots.size() && (int)i < nbiquad_; i++ )
+    if( !c.slots[i].bypass )
+      AudioFilterFactory::makeParametricEQ( out[i].a, out[i].b, c.slots[i].gain, c.slots[i].freq,
+                                            c.slots[i].q, kSampleRate );
+}
+
+/*! Writes the biquads that differ from prev (all of them if prev is NULL). */
+void MatrixModel::writeStages( MatrixChannelKind kind, int idx, const Channel& c, const Channel* prev )
+{
+  std::vector<Coef> now, before;
+  stages( c, now );
+  if( prev )
+    stages( *prev, before );
+  for( int s = 0; s < nbiquad_; s++ )
+    if( !prev || memcmp( &now[s], &before[s], sizeof( Coef ) ) != 0 )
+      port_.writeBiquad( kind, idx, s, now[s].a, now[s].b );
+}
+
+/*! Slot edit of a patch; changes only c, and only if it returns "". */
+std::string MatrixModel::applySlot( JsonObject op, Channel& c ) const
+{
+  const char* name = op["op"].as<const char*>();
+  if( !name )
+    return "missing slot op";
+  const bool add = ( strcmp( name, "add" ) == 0 );
+  if( !add && strcmp( name, "del" ) != 0 && strcmp( name, "set" ) != 0 )
+    return "unknown slot op";
+
+  Slot s = { false, 1000.0f, 1.0f, 0.0f };
+  int at = -1;
+  if( add )
+  {
+    if( (int)c.slots.size() >= nbiquad_ )
+      return "no biquads left";
+  }
+  else
+  {
+    if( !op["i"].is<int>() || op["i"].as<int>() < 0 || op["i"].as<int>() >= (int)c.slots.size() )
+      return "no such slot";
+    at = op["i"].as<int>();
+    s = c.slots[at];
+  }
+  if( strcmp( name, "del" ) == 0 )
+  {
+    c.slots.erase( c.slots.begin() + at );  // the following Slots close the gap
+    return "";
+  }
+  const struct { const char* key; float lo, hi; float* v; } nums[] = {
+    { "freq", kFreqMin, kFreqMax, &s.freq }, { "q", kQMin, kQMax, &s.q }, { "gain", kPeqGainMin, kPeqGainMax, &s.gain } };
+  for( size_t k = 0; k < 3; k++ )
+  {
+    if( !op.containsKey( nums[k].key ) )
+      continue;
+    if( !op[nums[k].key].is<float>() )
+      return std::string( nums[k].key ) + " must be a number";
+    const float v = op[nums[k].key].as<float>();
+    if( !( v >= nums[k].lo && v <= nums[k].hi ) )
+      return std::string( nums[k].key ) + " out of range";
+    *nums[k].v = v;
+  }
+  if( op.containsKey( "bypass" ) )
+  {
+    if( !op["bypass"].is<bool>() )
+      return "bypass must be true or false";
+    s.bypass = op["bypass"].as<bool>();
+  }
+  if( add )
+    c.slots.push_back( s );
+  else
+    c.slots[at] = s;
+  return "";
+}
+
+//==============================================================================
+MatrixModel::MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad )
   : port_( port ), nbus_( nbus < MATRIX_MAX_BUS ? nbus : MATRIX_MAX_BUS ),
-    nout_( nout < MATRIX_MAX_OUT ? nout : MATRIX_MAX_OUT ), dirty_( false ), lastChange_( 0 )
+    nout_( nout < MATRIX_MAX_OUT ? nout : MATRIX_MAX_OUT ), nbiquad_( nbiquad > 0 ? nbiquad : 0 ),
+    dirty_( false ), lastChange_( 0 )
 {
   undo_.valid = false;
   reset();
@@ -102,6 +203,7 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
 
   Channel next = isBus ? bus_[idx] : out_[idx];
   const Channel prev = next;
+  bool slotChanged = false;
 
   for( JsonPair kv : patch )
   {
@@ -132,6 +234,15 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
       if( !( g >= kGainMin && g <= kGainMax ) )
         return "gain out of range";
       next.gain = g;
+    }
+    else if( strcmp( key, "slot" ) == 0 )
+    {
+      if( !v.is<JsonObject>() )
+        return "slot must be an object";
+      std::string err = applySlot( v.as<JsonObject>(), next );
+      if( !err.empty() )
+        return err;
+      slotChanged = true;
     }
     else if( strcmp( key, "source" ) == 0 && isBus )
     {
@@ -177,7 +288,10 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
     }
   }
 
-  if( next.name != prev.name || next.mute != prev.mute || next.gain != prev.gain || switched )
+  if( slotChanged )
+    writeStages( ck, idx, next, &prev );
+
+  if( slotChanged || next.name != prev.name || next.mute != prev.mute || next.gain != prev.gain || switched )
   {
     dirty_ = true;
     lastChange_ = nowMs;
@@ -202,22 +316,70 @@ void MatrixModel::applyAll( void )
   {
     port_.writeSource( b, (uint32_t)bus_[b].sel );
     port_.writeGain( MATRIX_BUS, b, linear( bus_[b] ) );
+    writeStages( MATRIX_BUS, b, bus_[b], NULL );
   }
   for( int o = 0; o < nout_; o++ )
   {
     port_.writeRoute( o, out_[o].sel );
     port_.writeGain( MATRIX_OUT, o, linear( out_[o] ) );
+    writeStages( MATRIX_OUT, o, out_[o], NULL );
   }
 }
 
+std::string MatrixModel::coeffsJson( const char* ch, int idx ) const
+{
+  const bool isBus = ( strcmp( ch, "bus" ) == 0 );
+  if( !isBus && strcmp( ch, "out" ) != 0 )
+    return "";
+  if( idx < 0 || idx >= ( isBus ? nbus_ : nout_ ) )
+    return "";
+  const Channel& c = isBus ? bus_[idx] : out_[idx];
+  std::vector<Coef> st;
+  stages( c, st );
+  DynamicJsonDocument doc( 512 + 160 * nbiquad_ );
+  doc["fs"] = (int)kSampleRate;
+  JsonArray bq = doc.createNestedArray( "bq" );
+  for( size_t i = 0; i < c.slots.size() && (int)i < nbiquad_; i++ )
+  {
+    if( c.slots[i].bypass )
+      continue;
+    // the DSP stores 8.24: round to its grid; order b0 b1 b2 a1 a2
+    const double v[5] = { st[i].b[0], st[i].b[1], st[i].b[2], st[i].a[1], st[i].a[2] };
+    JsonArray row = bq.createNestedArray();
+    for( int k = 0; k < 5; k++ )
+      row.add( floor( v[k] * 16777216.0 + 0.5 ) / 16777216.0 );
+  }
+  return toString( doc );
+}
+
 //==============================================================================
-static void putChannel( JsonArray arr, const char* name, bool mute, float gain, const char* selKey, int sel )
+void MatrixModel::putChannel( JsonArray arr, const Channel& c, const char* selKey, bool withLimits ) const
 {
   JsonObject o = arr.createNestedObject();
-  o["name"] = name;
-  o[selKey] = sel;
-  o["mute"] = mute;
-  o["gain"] = gain;
+  o["name"] = c.name.c_str();
+  o[selKey] = c.sel;
+  o["mute"] = c.mute;
+  o["gain"] = c.gain;
+  JsonArray slots = o.createNestedArray( "slots" );
+  for( size_t i = 0; i < c.slots.size(); i++ )
+  {
+    JsonObject s = slots.createNestedObject();
+    s["type"] = "peq";
+    s["freq"] = c.slots[i].freq;
+    s["q"] = c.slots[i].q;
+    s["gain"] = c.slots[i].gain;
+    s["bypass"] = c.slots[i].bypass;
+  }
+  if( withLimits )
+  {
+    const int used = (int)c.slots.size();
+    o["budget"] = nbiquad_;
+    o["used"] = used;
+    o["free"] = nbiquad_ - used;
+    JsonArray add = o.createNestedArray( "addable" );  // Slot types that still fit
+    if( nbiquad_ - used >= 1 )
+      add.add( "peq" );
+  }
 }
 
 static std::string toString( const JsonDocument& doc )
@@ -229,11 +391,19 @@ static std::string toString( const JsonDocument& doc )
 
 std::string MatrixModel::stateJson( void ) const
 {
-  DynamicJsonDocument doc( 8192 );
+  DynamicJsonDocument doc( 8192 + 192 * slotCount() );
   doc["nbus"] = nbus_;
   doc["nout"] = nout_;
+  doc["nbiquad"] = nbiquad_;
   doc["gainmin"] = kGainMin;
   doc["gainmax"] = kGainMax;
+  JsonObject peq = doc.createNestedObject( "peq" );
+  peq["fmin"] = kFreqMin;
+  peq["fmax"] = kFreqMax;
+  peq["qmin"] = kQMin;
+  peq["qmax"] = kQMax;
+  peq["gmin"] = kPeqGainMin;
+  peq["gmax"] = kPeqGainMax;
   JsonArray srcs = doc.createNestedArray( "sources" );
   std::string names[kNumSources];
   for( int n = 0; n < kNumSources; n++ )
@@ -249,28 +419,27 @@ std::string MatrixModel::stateJson( void ) const
   routes.add( "Bus 1+2" );
   JsonArray buses = doc.createNestedArray( "buses" );
   for( int b = 0; b < nbus_; b++ )
-    putChannel( buses, bus_[b].name.c_str(), bus_[b].mute, bus_[b].gain, "source", bus_[b].sel );
+    putChannel( buses, bus_[b], "source", true );
   JsonArray outs = doc.createNestedArray( "outs" );
   for( int o = 0; o < nout_; o++ )
-    putChannel( outs, out_[o].name.c_str(), out_[o].mute, out_[o].gain, "route", out_[o].sel );
+    putChannel( outs, out_[o], "route", true );
   return toString( doc );
 }
 
 std::string MatrixModel::savePreset( void ) const
 {
-  DynamicJsonDocument doc( 4096 );
+  DynamicJsonDocument doc( 4096 + 192 * slotCount() );
   doc["v"] = kPresetVersion;
   JsonArray buses = doc.createNestedArray( "buses" );
   for( int b = 0; b < nbus_; b++ )
-    putChannel( buses, bus_[b].name.c_str(), bus_[b].mute, bus_[b].gain, "source", bus_[b].sel );
+    putChannel( buses, bus_[b], "source", false );
   JsonArray outs = doc.createNestedArray( "outs" );
   for( int o = 0; o < nout_; o++ )
-    putChannel( outs, out_[o].name.c_str(), out_[o].mute, out_[o].gain, "route", out_[o].sel );
+    putChannel( outs, out_[o], "route", false );
   return toString( doc );
 }
 
-static std::string readChannel( JsonObject o, bool isBus, std::string& name,
-                                bool& mute, float& gain, int& sel )
+std::string MatrixModel::readChannel( JsonObject o, bool isBus, Channel& c ) const
 {
   const char* n = o["name"].as<const char*>();
   if( !n || strlen( n ) > MATRIX_NAME_LEN )
@@ -283,23 +452,41 @@ static std::string readChannel( JsonObject o, bool isBus, std::string& name,
   {
     if( !o["source"].is<long>() || !sourceValid( o["source"].as<long>() ) )
       return "bad source";
-    sel = (int)o["source"].as<long>();
+    c.sel = (int)o["source"].as<long>();
   }
   else
   {
     if( !o["route"].is<int>() || o["route"].as<int>() < 0 || o["route"].as<int>() >= kNumRoutes )
       return "bad route";
-    sel = o["route"].as<int>();
+    c.sel = o["route"].as<int>();
   }
-  name = n;
-  mute = o["mute"].as<bool>();
-  gain = o["gain"].as<float>();
+  c.slots.clear();
+  JsonArray slots = o["slots"];  // optional: presets from before the Filter row have none
+  if( (int)slots.size() > nbiquad_ )
+    return "too many slots";
+  for( JsonObject s : slots )
+  {
+    Slot sl;
+    if( !s["freq"].is<float>() || !s["q"].is<float>() || !s["gain"].is<float>() || !s["bypass"].is<bool>() )
+      return "bad slot";
+    sl.freq = s["freq"];
+    sl.q = s["q"];
+    sl.gain = s["gain"];
+    sl.bypass = s["bypass"];
+    if( !( sl.freq >= kFreqMin && sl.freq <= kFreqMax && sl.q >= kQMin && sl.q <= kQMax
+           && sl.gain >= kPeqGainMin && sl.gain <= kPeqGainMax ) )
+      return "bad slot";
+    c.slots.push_back( sl );
+  }
+  c.name = n;
+  c.mute = o["mute"].as<bool>();
+  c.gain = o["gain"].as<float>();
   return "";
 }
 
 std::string MatrixModel::loadPreset( const std::string& json )
 {
-  DynamicJsonDocument doc( 4096 );
+  DynamicJsonDocument doc( 4 * json.size() + 1024 );
   if( deserializeJson( doc, json.c_str() ) )
     return "preset is not valid JSON";
   if( doc["v"] != kPresetVersion )
@@ -312,13 +499,13 @@ std::string MatrixModel::loadPreset( const std::string& json )
   Channel nb[MATRIX_MAX_BUS], no[MATRIX_MAX_OUT];
   for( int b = 0; b < nbus_; b++ )
   {
-    std::string err = readChannel( buses[b], true, nb[b].name, nb[b].mute, nb[b].gain, nb[b].sel );
+    std::string err = readChannel( buses[b], true, nb[b] );
     if( !err.empty() )
       return err;
   }
   for( int o = 0; o < nout_; o++ )
   {
-    std::string err = readChannel( outs[o], false, no[o].name, no[o].mute, no[o].gain, no[o].sel );
+    std::string err = readChannel( outs[o], false, no[o] );
     if( !err.empty() )
       return err;
   }

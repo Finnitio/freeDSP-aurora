@@ -1,6 +1,6 @@
 // Host tests for the matrix model (Bus Sources, Output routes, mute, gain, names, presets).
 // Build & run (ArduinoJson is header-only):
-//   g++ -std=c++11 -Wall -I ~/Documents/Arduino/libraries/ArduinoJson/src -o test_matrixmodel SOURCES/WEBAPP/ESP32/test/test_matrixmodel.cpp SOURCES/WEBAPP/ESP32/aurora/matrixmodel.cpp && ./test_matrixmodel
+//   g++ -std=gnu++11 -Wall -I ~/Documents/Arduino/libraries/ArduinoJson/src -o test_matrixmodel SOURCES/WEBAPP/ESP32/test/test_matrixmodel.cpp SOURCES/WEBAPP/ESP32/aurora/matrixmodel.cpp SOURCES/WEBAPP/ESP32/aurora/AudioFilterFactory.cpp && ./test_matrixmodel
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -22,6 +22,18 @@ struct FakePort : MatrixPort
   void writeGain(MatrixChannelKind kind, int idx, double linear) override { w.push_back({ 'g', kind, idx, linear }); }
   void writeRoute(int out, int route) override { w.push_back({ 'r', MATRIX_OUT, out, (double)route }); }
   void writeSource(int bus, uint32_t sel) override { w.push_back({ 's', MATRIX_BUS, bus, (double)sel }); }
+  struct Bq
+  {
+    MatrixChannelKind kind;
+    int idx, stage;
+    float a[3], b[3];
+  };
+  std::vector<Bq> bq;
+  void writeBiquad(MatrixChannelKind kind, int idx, int stage, const float a[3], const float b[3]) override
+  {
+    Bq q = { kind, idx, stage, { a[0], a[1], a[2] }, { b[0], b[1], b[2] } };
+    bq.push_back(q);
+  }
 };
 
 static std::string patch(MatrixModel& m, const char* json, uint32_t now = 0)
@@ -262,8 +274,201 @@ static void undoRestoresTheLastAcceptedPatch()
   assert(m.savePreset() == before);
 }
 
+//==============================================================================
+// Filter row: PEQ Slots on the Channel's biquads
+static bool isPassthrough(const FakePort::Bq& q)
+{
+  return q.b[0] == 1.0f && q.b[1] == 0 && q.b[2] == 0 && q.a[1] == 0 && q.a[2] == 0;
+}
+
+static const char* kAddPeq = "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"add\",\"freq\":1000,\"q\":1,\"gain\":6}}";
+
+// magnitude in dB of the quantized coefficients [b0,b1,b2,a1,a2] (a = negated denominator)
+static double magDb(const DynamicJsonDocument& c, double f)
+{
+  const double w = 2 * 3.14159265358979 * f / c["fs"].as<double>();
+  double db = 0;
+  for (size_t i = 0; i < c["bq"].size(); i++)
+  {
+    JsonVariantConst q = c["bq"][i];
+    double b0 = q[0], b1 = q[1], b2 = q[2], a1 = q[3], a2 = q[4];
+    double nr = b0 + b1 * std::cos(w) + b2 * std::cos(2 * w), ni = -b1 * std::sin(w) - b2 * std::sin(2 * w);
+    double dr = 1 - a1 * std::cos(w) - a2 * std::cos(2 * w), di = a1 * std::sin(w) + a2 * std::sin(2 * w);
+    db += 10 * std::log10((nr * nr + ni * ni) / (dr * dr + di * di));
+  }
+  return db;
+}
+
+static DynamicJsonDocument coeffsOf(const MatrixModel& m, const char* ch, int idx)
+{
+  DynamicJsonDocument doc(8192);
+  std::string s = m.coeffsJson(ch, idx);
+  assert(!deserializeJson(doc, s));
+  return doc;
+}
+
+static void addPeqWritesItsBiquad()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  assert(patch(m, kAddPeq).empty());
+  assert(port.bq.size() == 1);
+  assert(port.bq[0].kind == MATRIX_OUT && port.bq[0].idx == 1 && port.bq[0].stage == 0);
+  assert(!isPassthrough(port.bq[0]));
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["outs"][1]["slots"].size() == 1);
+  assert(st["outs"][1]["slots"][0]["freq"] == 1000);
+  assert(st["outs"][1]["budget"] == 4 && st["outs"][1]["used"] == 1 && st["outs"][1]["free"] == 3);
+  assert(st["outs"][0]["used"] == 0);
+}
+
+static void peqCoefficientsMatchTheDesign()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  patch(m, kAddPeq);
+  DynamicJsonDocument c = coeffsOf(m, "out", 1);
+  assert(c["bq"].size() == 1);
+  // reference: RBJ cookbook peaking EQ, f0 = 1 kHz, Q = 1, +6 dB, fs = 48 kHz
+  // (a1/a2 negated for the DSP); tolerance covers the DSP's bandwidth warping
+  const double ref[5] = { 1.0440, -1.8953, 0.8677, 1.8953, -0.9117 };
+  for (int i = 0; i < 5; i++)
+    assert(std::fabs(c["bq"][0][i].as<double>() - ref[i]) < 3e-3);
+  // quantized to 8.24 (JSON carries 9 digits, so allow a quarter LSB of text rounding)
+  for (int i = 0; i < 5; i++)
+  {
+    double v = c["bq"][0][i].as<double>() * 16777216.0;
+    assert(std::fabs(v - std::round(v)) < 0.25);
+  }
+  // the gain at the centre frequency is exactly the Slot gain, flat far away
+  assert(std::fabs(magDb(c, 1000) - 6.0) < 0.01);
+  assert(std::fabs(magDb(c, 20)) < 0.1);
+  assert(std::fabs(magDb(c, 20000)) < 0.6);
+  assert(coeffsOf(m, "out", 0)["bq"].size() == 0);
+}
+
+static void budgetRejectsAndAddDisabled()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 2);
+  assert(patch(m, kAddPeq).empty());
+  assert(patch(m, kAddPeq).empty());
+  size_t n = port.bq.size();
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["outs"][1]["free"] == 0);
+  assert(st["outs"][1]["addable"].size() == 0);
+  assert(st["outs"][0]["addable"].size() == 1);
+  assert(!patch(m, kAddPeq).empty());  // beyond the budget
+  assert(port.bq.size() == n);
+  assert(stateOf(m)["outs"][1]["slots"].size() == 2);
+}
+
+static void slotValuesAreValidated()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  assert(!patch(m, "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"add\",\"freq\":5}}").empty());
+  assert(!patch(m, "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"add\",\"freq\":30000}}").empty());
+  assert(!patch(m, "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"add\",\"q\":0}}").empty());
+  assert(!patch(m, "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"add\",\"gain\":99}}").empty());
+  assert(!patch(m, "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"nope\"}}").empty());
+  assert(!patch(m, "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"del\",\"i\":0}}").empty());
+  assert(!patch(m, "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"set\",\"i\":3,\"gain\":1}}").empty());
+  assert(port.bq.empty() && !m.dirty());
+}
+
+static void editWritesOnlyTheChangedBiquad()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  patch(m, kAddPeq);
+  patch(m, kAddPeq);
+  port.bq.clear();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"set\",\"i\":1,\"freq\":2000}}").empty());
+  assert(port.bq.size() == 1 && port.bq[0].stage == 1);
+  assert(stateOf(m)["outs"][1]["slots"][1]["freq"] == 2000);
+  assert(stateOf(m)["outs"][1]["slots"][0]["freq"] == 1000);
+}
+
+static void bypassWritesPassthroughAndKeepsAllocation()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 2);
+  patch(m, kAddPeq);
+  patch(m, kAddPeq);
+  port.bq.clear();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"set\",\"i\":0,\"bypass\":true}}").empty());
+  assert(port.bq.size() == 1 && port.bq[0].stage == 0 && isPassthrough(port.bq[0]));
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["outs"][1]["used"] == 2 && st["outs"][1]["free"] == 0);
+  assert(st["outs"][1]["slots"][0]["bypass"] == true);
+  assert(coeffsOf(m, "out", 1)["bq"].size() == 1);  // only the active one
+  // un-bypass never fails for lack of budget
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"set\",\"i\":0,\"bypass\":false}}").empty());
+  assert(!isPassthrough(port.bq.back()));
+}
+
+static void deleteRepacksAndFreesTheEnd()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  patch(m, "{\"ch\":\"bus\",\"idx\":0,\"slot\":{\"op\":\"add\",\"freq\":100}}");
+  patch(m, "{\"ch\":\"bus\",\"idx\":0,\"slot\":{\"op\":\"add\",\"freq\":200}}");
+  patch(m, "{\"ch\":\"bus\",\"idx\":0,\"slot\":{\"op\":\"add\",\"freq\":300}}");
+  port.bq.clear();
+  assert(patch(m, "{\"ch\":\"bus\",\"idx\":0,\"slot\":{\"op\":\"del\",\"i\":0}}").empty());
+  // stages 0 and 1 take the old slots 1 and 2; stage 2 is freed
+  assert(port.bq.size() == 3);
+  assert(port.bq[0].stage == 0 && !isPassthrough(port.bq[0]));
+  assert(port.bq[1].stage == 1 && !isPassthrough(port.bq[1]));
+  assert(port.bq[2].stage == 2 && isPassthrough(port.bq[2]));
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["buses"][0]["slots"].size() == 2 && st["buses"][0]["slots"][0]["freq"] == 200);
+  assert(st["buses"][0]["free"] == 2);
+}
+
+static void slotsRoundTripThroughPresetsAndReemit()
+{
+  FakePort port;
+  MatrixModel a(port, 2, 8, 4);
+  patch(a, kAddPeq);
+  patch(a, "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"set\",\"i\":0,\"bypass\":true}}");
+  std::string saved = a.savePreset();
+  FakePort port2;
+  MatrixModel b(port2, 2, 8, 4);
+  assert(b.loadPreset(saved).empty());
+  assert(b.savePreset() == saved);
+  assert(port2.bq.size() == 10 * 4);  // every biquad of every Channel
+  assert(stateOf(b)["outs"][1]["slots"][0]["bypass"] == true);
+  // a preset without slots (older file) still loads
+  FakePort port3;
+  MatrixModel c(port3, 2, 8, 4);
+  std::string fresh = c.savePreset();
+  assert(b.loadPreset(fresh).empty());
+  assert(stateOf(b)["outs"][1]["slots"].size() == 0);
+}
+
+static void undoRestoresSlots()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  const std::string before = m.savePreset();
+  patch(m, kAddPeq);
+  m.undo();
+  assert(m.savePreset() == before);
+}
+
 int main()
 {
+  addPeqWritesItsBiquad();
+  peqCoefficientsMatchTheDesign();
+  budgetRejectsAndAddDisabled();
+  slotValuesAreValidated();
+  editWritesOnlyTheChangedBiquad();
+  bypassWritesPassthroughAndKeepsAllocation();
+  deleteRepacksAndFreesTheEnd();
+  slotsRoundTripThroughPresetsAndReemit();
+  undoRestoresSlots();
   undoRestoresTheLastAcceptedPatch();
   freshDefaults();
   applyAllEmitsFullWriteSet();

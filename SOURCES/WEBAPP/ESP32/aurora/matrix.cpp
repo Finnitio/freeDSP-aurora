@@ -10,7 +10,7 @@
 
 namespace
 {
-enum OpType { OP_GAIN, OP_ROUTE, OP_SOURCE };
+enum OpType { OP_GAIN, OP_ROUTE, OP_SOURCE, OP_BIQUAD };
 
 struct Op
 {
@@ -18,7 +18,8 @@ struct Op
   MatrixChannelKind kind;
   int idx;
   double gain;   // OP_GAIN: linear
-  uint32_t sel;  // OP_ROUTE: route, OP_SOURCE: source code
+  uint32_t sel;  // OP_ROUTE: route, OP_SOURCE: source code, OP_BIQUAD: stage
+  float a[3], b[3];  // OP_BIQUAD
 };
 
 /*! Collects the model's writes; they are executed after the model call. */
@@ -26,9 +27,16 @@ class RecordPort : public MatrixPort
 {
 public:
   std::vector<Op> ops;
-  void writeGain( MatrixChannelKind kind, int idx, double linear ) override { ops.push_back( { OP_GAIN, kind, idx, linear, 0 } ); }
-  void writeRoute( int out, int route ) override { ops.push_back( { OP_ROUTE, MATRIX_OUT, out, 0.0, (uint32_t)route } ); }
-  void writeSource( int bus, uint32_t sel ) override { ops.push_back( { OP_SOURCE, MATRIX_BUS, bus, 0.0, sel } ); }
+  void writeGain( MatrixChannelKind kind, int idx, double linear ) override { ops.push_back( { OP_GAIN, kind, idx, linear, 0, {}, {} } ); }
+  void writeRoute( int out, int route ) override { ops.push_back( { OP_ROUTE, MATRIX_OUT, out, 0.0, (uint32_t)route, {}, {} } ); }
+  void writeSource( int bus, uint32_t sel ) override { ops.push_back( { OP_SOURCE, MATRIX_BUS, bus, 0.0, sel, {}, {} } ); }
+  void writeBiquad( MatrixChannelKind kind, int idx, int stage, const float a[3], const float b[3] ) override
+  {
+    Op op = { OP_BIQUAD, kind, idx, 0.0, (uint32_t)stage, {}, {} };
+    memcpy( op.a, a, sizeof( op.a ) );
+    memcpy( op.b, b, sizeof( op.b ) );
+    ops.push_back( op );
+  }
 };
 
 RecordPort port;
@@ -58,6 +66,11 @@ void execOps( const std::vector<Op>& ops )
       writeWord( op.kind == MATRIX_BUS ? matrixMeta.busgain[op.idx] : matrixMeta.outgain[op.idx], convertTo824( op.gain ) );
     else if( op.type == OP_ROUTE )
       writeWord( matrixMeta.outroute[op.idx], op.sel );
+    else if( op.type == OP_BIQUAD )
+    {
+      const uint16_t* base = ( op.kind == MATRIX_BUS ? matrixMeta.busbiquad : matrixMeta.outbiquad );
+      ADAU1452_WRITE_BIQUAD( base[op.idx * matrixMeta.nbiquad + op.sel], op.a, op.b );
+    }
     else
     {
       paramInputs[op.idx].sel = op.sel;
@@ -94,7 +107,15 @@ void matrixInit( void )
   if( !isMatrixPlugin() )
     return;
   modelMutex = xSemaphoreCreateMutex();
-  model = new MatrixModel( port, matrixMeta.nbus, matrixMeta.nout );
+  model = new MatrixModel( port, matrixMeta.nbus, matrixMeta.nout, matrixMeta.nbiquad );
+}
+
+std::string matrixCoeffs( const char* ch, int idx )
+{
+  if( !model )
+    return "";
+  ModelLock lock;
+  return model->coeffsJson( ch, idx );
 }
 
 void matrixLoadPreset( void )

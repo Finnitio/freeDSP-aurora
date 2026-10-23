@@ -24,6 +24,9 @@ bool matrixApply( JsonObject patch, std::string& reply );
 
 std::string matrixState( void );
 
+/*! Active biquad coefficients of one Channel (ch "bus" or "out") for the plot; "" if unknown. */
+std::string matrixCoeffs( const char* ch, int idx );
+
 /*! Call from loop(): queues the auto-save once the changes have settled. */
 void matrixLoop( void );
 

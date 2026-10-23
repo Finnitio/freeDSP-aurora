@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <string>
+#include <vector>
 #include <ArduinoJson.h>
 
 /*! State and rules of the matrix plugin: two Buses (each with a Source), eight
@@ -22,6 +23,15 @@ struct MatrixPort
   virtual void writeRoute( int out, int route ) = 0;
   /*! Source mux of a Bus; sel = (port << 16) | channel as in the input select. */
   virtual void writeSource( int bus, uint32_t sel ) = 0;
+  /*! One biquad of a Channel (stage 0 = first). a[3], b[3] as made by the
+   *  AudioFilterFactory (a[0] = 1, a1/a2 already negated for the DSP). */
+  virtual void writeBiquad( MatrixChannelKind kind, int idx, int stage, const float a[3], const float b[3] ) = 0;
+};
+
+/*! Coefficients of one biquad as made by the AudioFilterFactory. */
+struct MatrixCoef
+{
+  float a[3], b[3];
 };
 
 #define MATRIX_MAX_BUS 2
@@ -34,9 +44,11 @@ class MatrixModel
 public:
   /*! Starts with the defaults (no writes): Bus 1 = Analog 1, Bus 2 = Analog 2,
    *  Outputs alternate Bus 1 / Bus 2, all Outputs muted, 0 dB. */
-  MatrixModel( MatrixPort& port, int nbus, int nout );
+  MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad = 0 );
 
-  /*! Applies a patch {"ch":"bus"|"out","idx":n, name, mute, gain, source (Bus), route (Output)}.
+  /*! Applies a patch {"ch":"bus"|"out","idx":n, name, mute, gain, source (Bus), route (Output),
+   *  slot: {"op":"add","freq","q","gain"} | {"op":"del","i"} | {"op":"set","i", freq, q, gain, bypass}}.
+   *  PEQ Slots sit on the Channel's biquads in the order added (stage = Slot index).
    *  Returns "" on success, else the rejection reason; a rejected patch changes nothing. */
   std::string apply( JsonObject patch, uint32_t nowMs );
 
@@ -46,6 +58,11 @@ public:
 
   /*! Full state for the web page (Channels plus the selectable lists). */
   std::string stateJson( void ) const;
+
+  /*! Coefficients of a Channel's active (not bypassed) biquads for the plot:
+   *  {"fs":48000,"bq":[[b0,b1,b2,a1,a2],...]}, rounded to the DSP's 8.24 grid;
+   *  H(z) = (b0+b1 z^-1+b2 z^-2) / (1-a1 z^-1-a2 z^-2). "" if there is no such Channel. */
+  std::string coeffsJson( const char* ch, int idx ) const;
 
   /*! Versioned preset JSON, and its inverse. load() returns "" or the reason
    *  and, on success, writes everything to the DSP. */
@@ -66,18 +83,33 @@ public:
 private:
   void reset( void );
 
+  struct Slot  // PEQ
+  {
+    bool bypass;
+    float freq, q, gain;
+  };
+
   struct Channel
   {
     std::string name;
     bool mute;
     float gain;  // dB
     int sel;     // Bus: Source code; Output: route
+    std::vector<Slot> slots;
   };
 
+  typedef MatrixCoef Coef;
+
   double linear( const Channel& c ) const;
+  int slotCount( void ) const;
+  std::string applySlot( JsonObject op, Channel& c ) const;
+  void stages( const Channel& c, std::vector<Coef>& out ) const;
+  void writeStages( MatrixChannelKind kind, int idx, const Channel& c, const Channel* prev );
+  void putChannel( JsonArray arr, const Channel& c, const char* selKey, bool withLimits ) const;
+  std::string readChannel( JsonObject o, bool isBus, Channel& c ) const;
 
   MatrixPort& port_;
-  int nbus_, nout_;
+  int nbus_, nout_, nbiquad_;
   Channel bus_[MATRIX_MAX_BUS];
   Channel out_[MATRIX_MAX_OUT];
   bool dirty_;

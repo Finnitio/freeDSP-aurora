@@ -11,6 +11,11 @@ void ADAU1452_WRITE_REGISTER( uint16_t reg, byte msb, byte lsb );
  */
 void ADAU1452_WRITE_BLOCK( uint16_t regaddr, byte val[], uint16_t len );
 
+/*! Writes one biquad (B2 B1 B0 A2 A1) atomically through safeload; a[3], b[3] as
+ *  made by the AudioFilterFactory.
+ */
+void ADAU1452_WRITE_BIQUAD( uint16_t addr, const float* a, const float* b );
+
 /*! Converts a value to the DSP's 8.24 fixed point format.
  */
 uint32_t convertTo824( double val );
