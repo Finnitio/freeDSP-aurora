@@ -348,6 +348,14 @@ static void peqCoefficientsMatchTheDesign()
     double v = c["bq"][0][i].as<double>() * 16777216.0;
     assert(std::fabs(v - std::round(v)) < 0.25);
   }
+  // the firmware truncates (floor) to 8.24; the plot must show what the DSP gets
+  {
+    const float* a = port.bq[0].a;
+    const float* b = port.bq[0].b;
+    const double sent[5] = { b[0], b[1], b[2], a[1], a[2] };
+    for (int i = 0; i < 5; i++)
+      assert(std::fabs(c["bq"][0][i].as<double>() * 16777216.0 - std::floor(sent[i] * 16777216.0)) < 0.25);
+  }
   // the gain at the centre frequency is exactly the Slot gain, flat far away
   assert(std::fabs(magDb(c, 1000) - 6.0) < 0.01);
   assert(std::fabs(magDb(c, 20)) < 0.1);
@@ -511,6 +519,31 @@ static void delayBoundaryIs40ms()
   assert(stateOf(m)["outs"][0]["delaySamples"] == 1920);
 }
 
+static void delayLimitFollowsThePlugin()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 0, 480);  // plugin.ini maxdly = 10 ms
+  assert(stateOf(m)["delaymax"] == 480);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"delayUs\":10000}").empty());
+  assert(!patch(m, "{\"ch\":\"out\",\"idx\":0,\"delayUs\":10021}").empty());
+  // a larger plugin value is capped at 1920, a missing one means 1920
+  MatrixModel big(port, 2, 8, 0, 5000);
+  assert(stateOf(big)["delaymax"] == 1920);
+  MatrixModel none(port, 2, 8, 0, 0);
+  assert(stateOf(none)["delaymax"] == 1920);
+  // presets beyond the limit are refused
+  MatrixModel src(port, 2, 8);
+  patch(src, "{\"ch\":\"out\",\"idx\":0,\"delayUs\":20000}");
+  assert(!m.loadPreset(src.savePreset()).empty());
+}
+
+static void invalidJsonReasonIsAccurate()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  assert(m.loadPreset("not json").find("not valid JSON") != std::string::npos);
+}
+
 static void delayBypassWritesZeroAndKeepsValue()
 {
   FakePort port;
@@ -659,6 +692,8 @@ int main()
 {
   delayMicrosecondsRoundToSamples();
   delayBoundaryIs40ms();
+  delayLimitFollowsThePlugin();
+  invalidJsonReasonIsAccurate();
   delayBypassWritesZeroAndKeepsValue();
   polarityWritesAndIsOutputsOnly();
   gainBypassWritesUnityAndKeepsGain();

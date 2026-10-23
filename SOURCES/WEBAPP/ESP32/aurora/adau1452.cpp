@@ -82,7 +82,7 @@ public:
 /*! Writes one biquad atomically (safeload). a[], b[]: 3 coefficients each as
  *  made by the AudioFilterFactory; order on the DSP is B2 B1 B0 A2 A1.
  */
-static void writeBiquad( uint16_t addr, const float* a, const float* b )
+void writeBiquad( uint16_t addr, const float* a, const float* b )
 {
   const uint32_t words[5] = { convertTo824( b[2] ), convertTo824( b[1] ), convertTo824( b[0] ),
                               convertTo824( a[2] ), convertTo824( a[1] ) };
@@ -95,11 +95,6 @@ static void writeBiquad( uint16_t addr, const float* a, const float* b )
   WirePort port;
   I2cLock lock;  // both transactions back to back
   safeloadBiquad( port, safeloadCfg, addr, words );
-}
-
-void ADAU1452_WRITE_BIQUAD( uint16_t addr, const float* a, const float* b )
-{
-  writeBiquad( addr, a, b );
 }
 
 //==============================================================================

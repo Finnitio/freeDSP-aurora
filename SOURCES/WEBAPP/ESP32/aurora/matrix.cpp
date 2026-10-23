@@ -48,6 +48,7 @@ RecordPort port;
 MatrixModel* model = NULL;
 SemaphoreHandle_t modelMutex = NULL;  // the model is used by the web task, the worker and loop()
 uint8_t loadedPreset = 0;             // preset the model state belongs to
+bool keepStored = false;              // its file failed to load: never overwrite it with defaults
 
 class ModelLock
 {
@@ -86,7 +87,18 @@ void execOps( const std::vector<Op>& ops )
     else if( op.type == OP_BIQUAD )
     {
       const uint16_t* base = ( op.kind == MATRIX_BUS ? matrixMeta.busbiquad : matrixMeta.outbiquad );
-      ADAU1452_WRITE_BIQUAD( base[op.idx * matrixMeta.nbiquad + op.sel], op.a, op.b );
+      const uint16_t addr = base ? base[op.idx * matrixMeta.nbiquad + op.sel] : 0;
+      static bool warned = false;
+      if( addr == 0 )  // plugin.ini has no (or a short) biquad table: never write to address 0
+      {
+        if( !warned )
+        {
+          warned = true;
+          Serial.println( F("[ERROR] matrix: plugin.ini has no biquad address, skipping biquad writes") );
+        }
+      }
+      else
+        writeBiquad( addr, op.a, op.b );
     }
     else
     {
@@ -124,7 +136,7 @@ void matrixInit( void )
   if( !isMatrixPlugin() )
     return;
   modelMutex = xSemaphoreCreateMutex();
-  model = new MatrixModel( port, matrixMeta.nbus, matrixMeta.nout, matrixMeta.nbiquad );
+  model = new MatrixModel( port, matrixMeta.nbus, matrixMeta.nout, matrixMeta.nbiquad, matrixMeta.maxdly );
 }
 
 std::string matrixCoeffs( const char* ch, int idx )
@@ -155,15 +167,17 @@ void matrixLoadPreset( void )
   {
     ModelLock lock;
     oldPreset = loadedPreset;
-    if( model->dirty() )
+    if( model->dirty() && !keepStored )
       oldJson = model->savePreset();
     port.ops.clear();
     std::string err = json.empty() ? "no preset file" : model->loadPreset( json );
+    keepStored = false;
     if( !err.empty() )
     {
       Serial.print( F("matrix: using defaults: ") );
       Serial.println( err.c_str() );
       model->loadDefaults();
+      keepStored = !json.empty();  // an existing file stays as it is; edits are not auto-saved
     }
     loadedPreset = currentPreset;
     ops.swap( port.ops );
@@ -212,7 +226,7 @@ void matrixLoop( void )
   if( !model )
     return;
   ModelLock lock;
-  if( !model->saveDue( millis() ) )
+  if( keepStored || !model->saveDue( millis() ) )
     return;
   std::string json = model->savePreset();
   uint8_t preset = loadedPreset;

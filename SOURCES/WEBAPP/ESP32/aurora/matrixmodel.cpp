@@ -174,9 +174,10 @@ std::string MatrixModel::applySlot( JsonObject op, Channel& c ) const
 }
 
 //==============================================================================
-MatrixModel::MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad )
+MatrixModel::MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad, int maxDelay )
   : port_( port ), nbus_( nbus < MATRIX_MAX_BUS ? nbus : MATRIX_MAX_BUS ),
     nout_( nout < MATRIX_MAX_OUT ? nout : MATRIX_MAX_OUT ), nbiquad_( nbiquad > 0 ? nbiquad : 0 ),
+    maxDelay_( maxDelay > 0 && maxDelay < MATRIX_MAX_DELAY_SAMPLES ? maxDelay : MATRIX_MAX_DELAY_SAMPLES ),
     spdif_( 0 ), dirty_( false ), lastChange_( 0 )
 {
   undo_.valid = false;
@@ -304,13 +305,13 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
     {
       if( isBus )
         return std::string( "buses have no " ) + key;
-      if( key[0] == 'p' )
+      if( strcmp( key, "polarity" ) == 0 )
       {
         if( !v.is<bool>() )
           return "polarity must be true or false";
         next.polarity = v.as<bool>();
       }
-      else if( key[5] == 'B' )
+      else if( strcmp( key, "delayBypass" ) == 0 )
       {
         if( !v.is<bool>() )
           return "delayBypass must be true or false";
@@ -324,7 +325,7 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
         if( !( us >= 0.0 && us <= 1e6 ) )
           return "delay out of range";
         const int samples = (int)floor( us * kSampleRate / 1e6 + 0.5 );
-        if( samples > MATRIX_MAX_DELAY_SAMPLES )
+        if( samples > maxDelay_ )
           return "delay out of range";
         next.delay = samples;
       }
@@ -455,11 +456,11 @@ std::string MatrixModel::coeffsJson( const char* ch, int idx ) const
   {
     if( c.slots[i].bypass )
       continue;
-    // the DSP stores 8.24: round to its grid; order b0 b1 b2 a1 a2
+    // the DSP stores 8.24, convertTo824() truncates: floor to its grid; order b0 b1 b2 a1 a2
     const double v[5] = { st[i].b[0], st[i].b[1], st[i].b[2], st[i].a[1], st[i].a[2] };
     JsonArray row = bq.createNestedArray();
     for( int k = 0; k < 5; k++ )
-      row.add( floor( v[k] * 16777216.0 + 0.5 ) / 16777216.0 );
+      row.add( floor( v[k] * 16777216.0 ) / 16777216.0 );
   }
   return toString( doc );
 }
@@ -521,7 +522,7 @@ std::string MatrixModel::stateJson( void ) const
   doc["nbiquad"] = nbiquad_;
   doc["gainmin"] = kGainMin;
   doc["gainmax"] = kGainMax;
-  doc["delaymax"] = MATRIX_MAX_DELAY_SAMPLES;
+  doc["delaymax"] = maxDelay_;
   JsonObject peq = doc.createNestedObject( "peq" );
   peq["fmin"] = kFreqMin;
   peq["fmax"] = kFreqMax;
@@ -606,7 +607,7 @@ std::string MatrixModel::readChannel( JsonObject o, bool isBus, Channel& c ) con
     c.polarity = o["polarity"] | false;
     c.delay = o["delaySamples"] | 0;
     c.delayBypass = o["delayBypass"] | false;
-    if( c.delay < 0 || c.delay > MATRIX_MAX_DELAY_SAMPLES )
+    if( c.delay < 0 || c.delay > maxDelay_ )
       return "bad delay";
   }
   c.slots.clear();
@@ -635,9 +636,21 @@ std::string MatrixModel::readChannel( JsonObject o, bool isBus, Channel& c ) con
 
 std::string MatrixModel::loadPreset( const std::string& json )
 {
-  DynamicJsonDocument doc( 4 * json.size() + 1024 );
-  if( deserializeJson( doc, json.c_str() ) )
+  // a smaller document usually fits; the 4x one only when that ran out of memory
+  DynamicJsonDocument docS( 2 * json.size() + 1024 );
+  DeserializationError jerr = deserializeJson( docS, json.c_str() );
+  DynamicJsonDocument* big = NULL;
+  if( jerr == DeserializationError::NoMemory )
+  {
+    big = new DynamicJsonDocument( 4 * json.size() + 1024 );
+    jerr = deserializeJson( *big, json.c_str() );
+  }
+  struct Free { DynamicJsonDocument* p; ~Free() { delete p; } } freeBig = { big };
+  if( jerr == DeserializationError::NoMemory )
+    return "not enough memory for the preset";
+  if( jerr )
     return "preset is not valid JSON";
+  DynamicJsonDocument& doc = big ? *big : docS;
   if( doc["v"] != kPresetVersion )
     return "unknown preset version";
   JsonArray buses = doc["buses"];

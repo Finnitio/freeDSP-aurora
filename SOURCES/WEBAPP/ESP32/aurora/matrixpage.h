@@ -51,7 +51,7 @@ button:disabled{opacity:.4}
 <button id="add" class="wide" onclick="addSlot()">+ add</button>
 </div>
 <script>
-var st=null,timers={},seq=0,seen=0,late=false,view=null,cf=null,cseq=0,lv={};
+var st=null,timers={},seq=0,seen=0,late=false,view=null,cf=null,cseq=0,lv={},csig="",ct=0;
 function say(t){document.getElementById("msg").textContent=t||"";}
 function waitIdle(){return fetch("/idle").then(function(r){return r.text();}).then(function(t){
   if(t=="1")return;return new Promise(function(r){setTimeout(r,100);}).then(waitIdle);});}
@@ -135,22 +135,31 @@ function draw(){
   document.getElementById("buses").innerHTML=b;
   document.getElementById("outs").innerHTML=o;
 }
-document.addEventListener("focusout",function(){if(late)setTimeout(draw,0);});
+// A deferred rebuild must not land between pointerdown and pointerup: the button under the
+// pointer would be replaced and the click lost. So wait for the pointer to be released.
+var down=false;
+document.addEventListener("pointerdown",function(){down=true;});
+function released(){down=false;if(late)setTimeout(draw,0);}  // after the click has been dispatched
+document.addEventListener("pointerup",released);
+document.addEventListener("pointercancel",released);
+document.addEventListener("focusout",function(){if(late&&!down)setTimeout(draw,0);});
 
 // ---- filter page
 function chan(){return (view.ch=="bus"?st.buses:st.outs)[view.idx];}
-function openF(ch,i){view={ch:ch,idx:i};cf=null;late=false;
+function openF(ch,i){view={ch:ch,idx:i};cf=null;csig="";late=false;
   document.getElementById("main").style.display="none";document.getElementById("flt").style.display="";
   drawF();}
 function closeF(){view=null;late=false;
   document.getElementById("main").style.display="";document.getElementById("flt").style.display="none";draw();}
 function fpos(f){return Math.round(1000*Math.log(f/st.peq.fmin)/Math.log(st.peq.fmax/st.peq.fmin));}
 function fval(p){return parseFloat((st.peq.fmin*Math.pow(st.peq.fmax/st.peq.fmin,p/1000)).toPrecision(4));}
-function slider(i,lbl,key,min,max,step,val,unit,pos){
+// val: the slider position (Freq: log steps); the label shows the model's own value, shown
+function shown(v){return parseFloat(v.toPrecision(4));}
+function slider(i,lbl,key,min,max,step,val,unit,shownVal){
   var id="s"+i+key;
-  return "<div class='row'><span class='lbl'>"+lbl+"</span><input type='range' class='gain' min='"+min+"' max='"+max+"' step='"+step+"' value='"+val+"'"
+  return "<div class='row'><span class='lbl'>"+lbl+"</span><input type='range' id='"+id+"i' class='gain' min='"+min+"' max='"+max+"' step='"+step+"' value='"+val+"'"
    +" oninput=\"slotSet("+i+",'"+key+"',this.value)\" onchange=\"slotSend("+i+",'"+key+"',this.value)\">"
-   +"<span class='gv' id='"+id+"'>"+(key=="freq"?fval(pos):val)+" "+unit+"</span></div>";
+   +"<span class='gv' id='"+id+"'>"+shown(shownVal)+" "+unit+"</span></div>";
 }
 function slotVal(key,v){return key=="freq"?fval(parseInt(v)):parseFloat(v);}
 function slotSet(i,key,v){
@@ -175,24 +184,40 @@ function sendTop(f){send(view.ch,view.idx,f);}
 function topHtml(c){
   var h="<div class='slot'><div class='row'><b class='name'>Gain</b>"
    +"<button class='mute"+(c.gainBypass?" on":"")+"' onclick='sendTop({gainBypass:"+!c.gainBypass+"})'>Bypass</button></div>"
-   +"<div class='row'><input type='range' class='gain' min='"+st.gainmin+"' max='"+st.gainmax+"' step='0.5' value='"+c.gain+"' oninput='topGain(this.value)' onchange='sendTop({gain:parseFloat(this.value)})'>"
+   +"<div class='row'><input type='range' id='tgi' class='gain' min='"+st.gainmin+"' max='"+st.gainmax+"' step='0.5' value='"+c.gain+"' oninput='topGain(this.value)' onchange='sendTop({gain:parseFloat(this.value)})'>"
    +"<span class='gv' id='tgv'>"+c.gain+" dB</span></div></div>";
   if(view.ch!="out")return h;
   h+="<div class='slot'><div class='row'><b class='name'>Polarity</b>"
    +"<button class='mute"+(c.polarity?" on":"")+"' onclick='sendTop({polarity:"+!c.polarity+"})'>"+(c.polarity?"Inverted":"Normal")+"</button></div></div>";
   h+="<div class='slot'><div class='row'><b class='name'>Delay</b>"
    +"<button class='mute"+(c.delayBypass?" on":"")+"' onclick='sendTop({delayBypass:"+!c.delayBypass+"})'>Bypass</button></div>"
-   +"<div class='row'><input type='number' class='name' min='0' max='"+Math.round(st.delaymax*1e6/48000)+"' step='1' value='"+Math.round(c.delayUs)+"' onchange='sendTop({delayUs:parseFloat(this.value)})'><span>&micro;s</span></div>"
-   +"<div class='row'>Applied: "+c.delayUs.toFixed(1)+" &micro;s = "+c.delaySamples+" samples = "+c.delayMm.toFixed(1)+" mm"+(c.delayBypass?" (bypassed)":"")+"</div></div>";
+   +"<div class='row'><input type='number' class='name' min='0' max='"+Math.floor(st.delaymax*1e6/48000)+"' step='1' value='"+Math.round(c.delayUs)+"' onchange='sendTop({delayUs:parseFloat(this.value)})'><span>&micro;s</span></div>"
+   +"<div class='row' id='dapp'>"+applied(c)+"</div></div>";
   return h;
+}
+function applied(c){
+  return "Applied: "+c.delayUs.toFixed(1)+" &micro;s = "+c.delaySamples+" samples = "+c.delayMm.toFixed(1)+" mm"+(c.delayBypass?" (bypassed)":"");
+}
+// While an input has focus the DOM stays, but the readouts and labels follow the model.
+function refreshLabels(c){
+  var a=document.activeElement?document.activeElement.id:"",e;
+  if(view.ch=="out"&&(e=document.getElementById("dapp")))e.innerHTML=applied(c);
+  if(a!="tgi"&&(e=document.getElementById("tgv")))e.textContent=c.gain+" dB";
+  c.slots.forEach(function(s,i){
+    [["freq",s.freq,"Hz"],["q",s.q,""],["gain",s.gain,"dB"]].forEach(function(k){
+      if(a=="s"+i+k[0]+"i")return;
+      if(e=document.getElementById("s"+i+k[0]))e.textContent=shown(k[1])+" "+k[2];
+    });
+  });
 }
 function drawF(){
   var c=chan();
   document.getElementById("ftitle").textContent=c.name;
   document.getElementById("budget").textContent="Biquads: "+c.used+" of "+c.budget+" used, "+c.free+" free";
   document.getElementById("add").disabled=c.addable.indexOf("peq")<0;
-  coeffs();
-  if(busy("#slots,#top")){late=true;return;}
+  var sig=JSON.stringify(c.slots);  // the plot depends on the Slots only
+  if(sig!=csig){csig=sig;if(!ct)ct=setTimeout(function(){ct=0;if(view)coeffs();},150);}
+  if(busy("#slots,#top")){late=true;refreshLabels(c);return;}
   late=false;
   document.getElementById("top").innerHTML=topHtml(c);
   var h="",p=st.peq;
@@ -200,9 +225,9 @@ function drawF(){
     h+="<div class='slot'><div class='row'><b class='name'>PEQ "+(i+1)+"</b>"
      +"<button class='mute"+(s.bypass?" on":"")+"' onclick='bypass("+i+","+!s.bypass+")'>Bypass</button>"
      +"<button class='mute' onclick='delSlot("+i+")'>Delete</button></div>"
-     +slider(i,"Freq","freq",0,1000,1,fpos(s.freq),"Hz",fpos(s.freq))
-     +slider(i,"Q","q",p.qmin,p.qmax,0.1,s.q,"",0)
-     +slider(i,"Gain","gain",p.gmin,p.gmax,0.5,s.gain,"dB",0)+"</div>";
+     +slider(i,"Freq","freq",0,1000,1,fpos(s.freq),"Hz",s.freq)
+     +slider(i,"Q","q",p.qmin,p.qmax,0.1,s.q,"",s.q)
+     +slider(i,"Gain","gain",p.gmin,p.gmax,0.5,s.gain,"dB",s.gain)+"</div>";
   });
   document.getElementById("slots").innerHTML=h;
 }

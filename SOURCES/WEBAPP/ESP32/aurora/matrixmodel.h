@@ -53,8 +53,9 @@ class MatrixModel
 {
 public:
   /*! Starts with the defaults (no writes): Bus 1 = Analog 1, Bus 2 = Analog 2,
-   *  Outputs alternate Bus 1 / Bus 2, all Outputs muted, 0 dB. */
-  MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad = 0 );
+   *  Outputs alternate Bus 1 / Bus 2, all Outputs muted, 0 dB. maxDelay: the plugin's
+   *  Output delay limit in samples (0 = unknown), capped at MATRIX_MAX_DELAY_SAMPLES. */
+  MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad = 0, int maxDelay = 0 );
 
   /*! Applies a patch {"ch":"bus"|"out","idx":n, name, mute, gain, source (Bus), route (Output),
    *  gainBypass, and on Outputs only polarity (bool), delayUs (rounded to whole samples, max 40 ms)
@@ -127,6 +128,7 @@ private:
 
   MatrixPort& port_;
   int nbus_, nout_, nbiquad_;
+  int maxDelay_;  // samples: the plugin's maxdly, at most MATRIX_MAX_DELAY_SAMPLES
   Channel bus_[MATRIX_MAX_BUS];
   Channel out_[MATRIX_MAX_OUT];
   uint32_t spdif_;  // left code of the SPDIF out pair
