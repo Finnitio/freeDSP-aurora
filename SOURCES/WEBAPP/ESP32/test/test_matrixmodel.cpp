@@ -230,7 +230,7 @@ static void badPresetIsRejectedAndKeepsState()
   MatrixModel m(port, 2, 8);
   std::string good = m.savePreset();
   assert(!m.loadPreset("not json").empty());
-  assert(!m.loadPreset("{\"v\":2,\"buses\":[],\"outs\":[]}").empty());  // unknown version
+  assert(!m.loadPreset("{\"v\":3,\"buses\":[],\"outs\":[]}").empty());  // unknown version
   assert(!m.loadPreset("{\"v\":1,\"buses\":[],\"outs\":[]}").empty());  // wrong counts
   assert(m.savePreset() == good);
   assert(port.w.empty());
@@ -372,8 +372,7 @@ static void budgetRejectsAndAddDisabled()
   size_t n = port.bq.size();
   DynamicJsonDocument st = stateOf(m);
   assert(st["outs"][1]["free"] == 0);
-  assert(st["outs"][1]["addable"].size() == 0);
-  assert(st["outs"][0]["addable"].size() > 0);
+  assert(st["outs"][0]["free"] > 0 && !st["outs"][1].containsKey("addable"));
   assert(!patch(m, kAddPeq).empty());  // beyond the budget
   assert(port.bq.size() == n);
   assert(stateOf(m)["outs"][1]["slots"].size() == 2);
@@ -625,9 +624,12 @@ static void slotTypeAndOrderAreValidated()
 static std::vector<std::string> addable(const DynamicJsonDocument& st, const char* ch, int idx)
 {
   std::vector<std::string> r;
-  for (size_t i = 0; i < st[ch][idx]["addable"].size(); i++)
+  // as the page does: every choice whose cost fits the channel's free biquads
+  for (size_t i = 0; i < st["choices"].size(); i++)
   {
-    JsonVariantConst c = st["choices"][st[ch][idx]["addable"][i].as<int>()];
+    JsonVariantConst c = st["choices"][i];
+    if (c["c"].as<int>() > st[ch][idx]["free"].as<int>())
+      continue;
     std::string s = c["t"].as<const char*>();
     if (c["d"].is<const char*>())
       s += std::string(":") + c["d"].as<const char*>() + std::to_string(c["o"].as<int>());
@@ -737,6 +739,106 @@ static void slotTypesRoundTripThroughPresets()
   MatrixModel d(port5, 2, 8, 4);
   assert(d.loadPreset(legacy).empty());
   assert(std::string(stateOf(d)["outs"][1]["slots"][0]["type"].as<const char*>()) == "peq");
+}
+
+static void nullOrNonStringTypeIsRejected()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  const std::string before = m.savePreset();
+  assert(!addSlot(m, "\"type\":null").empty());
+  assert(!addSlot(m, "\"type\":5").empty());
+  assert(!addSlot(m, "\"type\":\"bogus\"").empty());
+  assert(port.bq.empty() && m.savePreset() == before);
+  addSlot(m, "\"type\":\"peq\"");
+  assert(!setSlot(m, 0, "\"type\":null").empty());
+  assert(!setSlot(m, 0, "\"type\":7").empty());
+  // a preset Slot with a null or non-string type is bad, not a PEQ
+  std::string saved = m.savePreset();
+  for (const char* bad : { "\"type\":null", "\"type\":5" })
+  {
+    std::string p = saved;
+    p.replace(p.find("\"type\":\"peq\""), 12, bad);
+    FakePort port2;
+    MatrixModel m2(port2, 2, 8, 4);
+    assert(m2.loadPreset(p) == "bad slot");
+  }
+}
+
+static void typeChangeResetsHiddenDesignAndOrder()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 5);
+  assert(addSlot(m, "\"type\":\"hp\",\"design\":\"lr\",\"order\":8").empty());  // 4 of 5 used
+  assert(setSlot(m, 0, "\"type\":\"peq\"").empty());                             // 1 used
+  for (int k = 0; k < 3; k++)
+    assert(addSlot(m, "\"type\":\"peq\"").empty());                              // 4 used, 1 free
+  assert(setSlot(m, 0, "\"type\":\"hp\"").empty());                              // back to HP: cheapest default, not LR8
+  DynamicJsonDocument st = stateOf(m);
+  assert(std::string(st["outs"][1]["slots"][0]["design"].as<const char*>()) == "bw");
+  assert(st["outs"][1]["slots"][0]["order"] == 1);
+  assert(st["outs"][1]["used"] == 4);
+}
+
+static void garbageDesignAndOrderAreNeverStored()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  assert(addSlot(m, "\"type\":\"peq\",\"order\":99,\"design\":\"lr\"").empty());
+  assert(addSlot(m, "\"type\":\"phase\",\"order\":99").empty());
+  assert(setSlot(m, 0, "\"order\":99").empty());
+  std::string saved = m.savePreset();
+  assert(saved.find("99") == std::string::npos);
+  // a switch to HP never sees the ignored values
+  assert(setSlot(m, 0, "\"type\":\"hp\"").empty());
+  assert(stateOf(m)["outs"][1]["slots"][0]["order"] == 1);
+}
+
+static void presetSlotFieldsAreTypeChecked()
+{
+  FakePort port;
+  MatrixModel a(port, 2, 8, 4);
+  addSlot(a, "\"type\":\"hp\",\"design\":\"bw\",\"order\":2");
+  std::string saved = a.savePreset();
+  struct { const char* from; const char* to; } bad[] = {
+    { "\"design\":\"bw\"", "\"design\":\"xx\"" }, { "\"design\":\"bw\"", "\"design\":3" },
+    { "\"order\":2", "\"order\":2.5" },           { "\"order\":2", "\"order\":\"2\"" },
+    { "\"slope\":1", "\"slope\":\"1\"" },         { "\"slope\":1", "\"slope\":true" },
+  };
+  for (size_t k = 0; k < sizeof(bad) / sizeof(bad[0]); k++)
+  {
+    std::string p = saved;
+    size_t at = p.find(bad[k].from);
+    assert(at != std::string::npos);
+    p.replace(at, strlen(bad[k].from), bad[k].to);
+    FakePort port2;
+    MatrixModel b(port2, 2, 8, 4);
+    assert(b.loadPreset(p) == "bad slot");
+  }
+  // optional fields may be missing
+  std::string p = saved;
+  p.erase(p.find("\"slope\":1,"), 10);
+  FakePort port3;
+  MatrixModel c(port3, 2, 8, 4);
+  assert(c.loadPreset(p).empty());
+}
+
+static void presetVersionIsBumpedAndOldOnesStillLoad()
+{
+  FakePort port;
+  MatrixModel a(port, 2, 8, 4);
+  addSlot(a, "\"type\":\"peq\"");
+  std::string saved = a.savePreset();
+  assert(saved.find("\"v\":2") != std::string::npos);
+  std::string v1 = saved;
+  v1.replace(v1.find("\"v\":2"), 5, "\"v\":1");
+  FakePort port2;
+  MatrixModel b(port2, 2, 8, 4);
+  assert(b.loadPreset(v1).empty());
+  assert(b.savePreset() == saved);
+  std::string v3 = saved;
+  v3.replace(v3.find("\"v\":2"), 5, "\"v\":3");
+  assert(!b.loadPreset(v3).empty());
 }
 
 static std::vector<Write> only(const FakePort& port, char type)
@@ -982,6 +1084,11 @@ int main()
   freeBudgetOfThreeOffersUpToSixthOrderButterworth();
   raisingTheOrderBeyondTheBudgetIsRejected();
   slotTypesRoundTripThroughPresets();
+  nullOrNonStringTypeIsRejected();
+  typeChangeResetsHiddenDesignAndOrder();
+  garbageDesignAndOrderAreNeverStored();
+  presetSlotFieldsAreTypeChecked();
+  presetVersionIsBumpedAndOldOnesStillLoad();
   undoRestoresTheLastAcceptedPatch();
   spdifOutDefaultsAndPairs();
   spdifOutEmitsLeftAndRightMuxWrites();

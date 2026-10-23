@@ -233,7 +233,7 @@ function drawF(){
   var c=chan();
   document.getElementById("ftitle").textContent=c.name;
   document.getElementById("budget").textContent="Biquads: "+c.used+" of "+c.budget+" used, "+c.free+" free";
-  document.getElementById("add").disabled=c.addable.length==0;  // nothing fits any more
+  document.getElementById("add").disabled=!st.choices.some(function(o){return o.c<=c.free;});  // nothing fits any more
   var sig=JSON.stringify(c.slots);  // the plot depends on the Slots only
   if(sig!=csig){csig=sig;if(!ct)ct=setTimeout(function(){ct=0;if(view)coeffs();},150);}
   if(busy("#slots,#top")){late=true;refreshLabels(c);return;}

@@ -7,7 +7,7 @@
 
 static std::string toString( const JsonDocument& doc );
 
-static const int kPresetVersion = 1;
+static const int kPresetVersion = 2;
 static const float kSampleRate = 48000.0f;
 static const float kFreqMin = 20.0f, kFreqMax = 20000.0f;
 static const float kQMin = 0.1f, kQMax = 20.0f;
@@ -101,6 +101,15 @@ static MatrixCoef passthroughCoef( void )
 static const char* const kTypeNames[] = { "peq", "hp", "lp", "lshelf", "hshelf", "phase" };
 static const int kNumTypes = 6;
 static const int kMaxOrder = 8;
+
+/*! Index of a type name, -1 for NULL or an unknown name. */
+static int typeFromName( const char* name )
+{
+  for( int k = 0; name && k < kNumTypes; k++ )
+    if( strcmp( name, kTypeNames[k] ) == 0 )
+      return k;
+  return -1;
+}
 
 /*! Butterworth order n = ceil(n/2) biquads, Linkwitz-Riley order n = n/2, the rest 1. */
 int MatrixModel::cost( const Slot& s )
@@ -247,12 +256,14 @@ std::string MatrixModel::applySlot( JsonObject op, Channel& c ) const
   }
   if( op.containsKey( "type" ) )
   {
-    const char* t = op["type"].as<const char*>();
-    int k = 0;
-    while( t && k < kNumTypes && strcmp( t, kTypeNames[k] ) != 0 )
-      k++;
-    if( k == kNumTypes )
+    const int k = typeFromName( op["type"].as<const char*>() );
+    if( k < 0 )
       return "no such slot type";
+    if( !add && k != (int)s.type )  // a hidden design/order of the old type must not carry over
+    {
+      s.lr = false;
+      s.order = 1;
+    }
     s.type = (SlotType)k;
   }
   if( op.containsKey( "design" ) )
@@ -268,8 +279,16 @@ std::string MatrixModel::applySlot( JsonObject op, Channel& c ) const
       return "order must be a number";
     s.order = op["order"].as<int>();
   }
-  if( ( s.type == SLOT_HP || s.type == SLOT_LP ) && !orderValid( s.lr, s.order ) )
-    return s.lr ? "Linkwitz-Riley order must be 2, 4 or 8" : "Butterworth order must be 1 to 8";
+  if( s.type == SLOT_HP || s.type == SLOT_LP )
+  {
+    if( !orderValid( s.lr, s.order ) )
+      return s.lr ? "Linkwitz-Riley order must be 2, 4 or 8" : "Butterworth order must be 1 to 8";
+  }
+  else
+  {
+    s.lr = false;  // design and order only exist for HP and LP; never store them elsewhere
+    s.order = 1;
+  }
   if( used( c ) - ( add ? 0 : cost( c.slots[at] ) ) + cost( s ) > nbiquad_ )
     return add ? "no biquads left" : "not enough biquads left";
   if( add )
@@ -620,10 +639,6 @@ void MatrixModel::putChannel( JsonArray arr, const Channel& c, const char* selKe
     o["budget"] = nbiquad_;
     o["used"] = used( c );
     o["free"] = free;
-    JsonArray add = o.createNestedArray( "addable" );  // indices into "choices" that still fit
-    for( int n = 0; n < choiceCount(); n++ )
-      if( cost( choice( n ) ) <= free )
-        add.add( n );
   }
 }
 
@@ -762,17 +777,39 @@ std::string MatrixModel::readChannel( JsonObject o, bool isBus, Channel& c ) con
     // optional: presets from before the Slot types are all PEQs
     if( s.containsKey( "type" ) )
     {
-      const char* t = s["type"].as<const char*>();
-      int k = 0;
-      while( t && k < kNumTypes && strcmp( t, kTypeNames[k] ) != 0 )
-        k++;
-      if( k == kNumTypes )
+      const int k = typeFromName( s["type"].as<const char*>() );
+      if( k < 0 )
         return "bad slot";
       sl.type = (SlotType)k;
     }
-    sl.lr = ( strcmp( s["design"] | "bw", "lr" ) == 0 );
-    sl.order = s["order"] | 2;
-    sl.slope = s["slope"] | 1.0f;
+    // optional, but not coerced when present
+    sl.lr = false;
+    if( s.containsKey( "design" ) )
+    {
+      const char* d = s["design"].as<const char*>();
+      if( !d || ( strcmp( d, "bw" ) != 0 && strcmp( d, "lr" ) != 0 ) )
+        return "bad slot";
+      sl.lr = ( strcmp( d, "lr" ) == 0 );
+    }
+    sl.order = 2;
+    if( s.containsKey( "order" ) )
+    {
+      if( !s["order"].is<int>() )
+        return "bad slot";
+      sl.order = s["order"].as<int>();
+    }
+    sl.slope = 1.0f;
+    if( s.containsKey( "slope" ) )
+    {
+      if( !s["slope"].is<float>() )
+        return "bad slot";
+      sl.slope = s["slope"].as<float>();
+    }
+    if( sl.type != SLOT_HP && sl.type != SLOT_LP )
+    {
+      sl.lr = false;  // design and order only exist for HP and LP
+      sl.order = 1;
+    }
     if( !( sl.freq >= kFreqMin && sl.freq <= kFreqMax && sl.q >= kQMin && sl.q <= kQMax
            && sl.gain >= kPeqGainMin && sl.gain <= kPeqGainMax && sl.slope >= kSlopeMin && sl.slope <= kSlopeMax ) )
       return "bad slot";
@@ -805,7 +842,8 @@ std::string MatrixModel::loadPreset( const std::string& json )
   if( jerr )
     return "preset is not valid JSON";
   DynamicJsonDocument& doc = big ? *big : docS;
-  if( doc["v"] != kPresetVersion )
+  const int version = doc["v"] | 0;
+  if( version < 1 || version > kPresetVersion )  // version 1 (PEQ-only Slots) still loads
     return "unknown preset version";
   JsonArray buses = doc["buses"];
   JsonArray outs = doc["outs"];
