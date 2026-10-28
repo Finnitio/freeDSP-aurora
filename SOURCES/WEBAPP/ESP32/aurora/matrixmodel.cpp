@@ -30,14 +30,22 @@ static int linkFromId( const char* id, bool isBus )
   return strlen( id ) == 1 && id[0] >= 'A' && id[0] < 'A' + MATRIX_OUT_LINKS ? id[0] - 'A' : -2;
 }
 
-/*! A Link group named on its own: "A".."D" = 0..3 (Outputs), "bus" = kBusLinkGroup, -2 for
- *  anything else, NULL included. */
-static const int kBusLinkGroup = MATRIX_OUT_LINKS;
-static int linkGroupFromId( const char* id )
+/*! A Link group named on its own ("bus", "A".."D"); found is false for anything else, NULL
+ *  included. index is the Link group within its scope (always 0 for the Buses' one). */
+struct LinkGroupId
 {
-  if( !id || id[0] == 0 ) return -2;
-  if( strcmp( id, "bus" ) == 0 ) return kBusLinkGroup;
-  return linkFromId( id, false );
+  bool found;
+  bool isBus;
+  int index;
+};
+static LinkGroupId linkGroupFromId( const char* id )
+{
+  const LinkGroupId none = { false, false, 0 };
+  if( !id || id[0] == 0 ) return none;
+  if( strcmp( id, "bus" ) == 0 ) return { true, true, 0 };
+  const int out = linkFromId( id, false );
+  if( out < 0 ) return none;
+  return { true, false, out };
 }
 
 /*! The id of a Link group, inverse of linkFromId(); buf holds at least 4 chars. Returns a
@@ -535,29 +543,39 @@ MatrixEditResult MatrixModel::apply( JsonObject patch, uint32_t nowMs )
 
 std::string MatrixModel::applyLinkGroup( JsonObject patch, uint32_t nowMs )
 {
-  const int parsed = linkGroupFromId( patch["linkGroup"].as<const char*>() );
-  if( parsed == -2 ) return "no such Link group";
-  const bool isBus = parsed == kBusLinkGroup;
-  const int linkGroup = isBus ? 0 : parsed;
+  // The linked aspects a patch may set; Buses cannot link delay.
+  struct LinkedAspect
+  {
+    const char* key;
+    bool LinkGroup::* flag;
+    bool onBuses;
+  };
+  static const LinkedAspect kAspects[] = {
+    { "mute", &LinkGroup::mute, true },
+    { "filters", &LinkGroup::filters, true },
+    { "gain", &LinkGroup::gain, true },
+    { "delay", &LinkGroup::delay, false },
+  };
+
+  const LinkGroupId id = linkGroupFromId( patch["linkGroup"].as<const char*>() );
+  if( !id.found ) return "no such Link group";
+  const bool isBus = id.isBus;
+  const int linkGroup = id.index;
   LinkGroup next = isBus ? busLink_ : outLink_[linkGroup];
   bool touched = false;
   for( JsonPair kv : patch )
   {
     const char* key = kv.key().c_str();
     if( strcmp( key, "linkGroup" ) == 0 ) continue;
-    if( strcmp( key, "mute" ) != 0 && strcmp( key, "filters" ) != 0 && strcmp( key, "gain" ) != 0
-        && strcmp( key, "delay" ) != 0 )
+    const LinkedAspect* aspect = NULL;
+    for( const LinkedAspect& a : kAspects )
+      if( strcmp( key, a.key ) == 0 ) aspect = &a;
+    if( !aspect )
       return std::string( "unknown field " ) + key;
     if( !kv.value().is<bool>() ) return std::string( key ) + " must be true or false";
     const bool v = kv.value().as<bool>();
-    if( strcmp( key, "mute" ) == 0 ) next.mute = v;
-    else if( strcmp( key, "filters" ) == 0 ) next.filters = v;
-    else if( strcmp( key, "gain" ) == 0 ) next.gain = v;
-    else
-    {
-      if( isBus && v ) return "Buses have no delay link";
-      next.delay = v;
-    }
+    if( isBus && v && !aspect->onBuses ) return "Buses have no delay link";
+    next.*( aspect->flag ) = v;
     touched = true;
   }
   if( !touched ) return "missing linked aspect";
