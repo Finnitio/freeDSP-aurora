@@ -23,6 +23,7 @@ button.mute{width:56px;height:30px;border-top-width:1px}
 button.on{background-color:#802020}
 #msg{color:#e08080;min-height:18px}
 #presets button{width:44px;height:30px;border-top-width:1px}
+.file{display:inline-block;box-sizing:border-box;height:30px;line-height:28px;padding:0 10px;border:1px solid #808080;border-radius:2px;color:#fff;text-decoration:none;cursor:pointer}
 .slot{border:1px solid #606060;border-radius:3px;padding:2px 8px;margin:8px 0}
 .lbl{flex:0 0 40px}
 #plot{width:100%;height:200px;background:#101010;border:1px solid #606060}
@@ -47,7 +48,7 @@ button:disabled{opacity:.4}
 <div class="top"><h1>Aurora DSP</h1><button class="mute" onclick="openWifi()">WiFi</button></div>
 <div id="msg"></div>
 <div id="main">
-<div id="presets" class="row"></div>
+<div class="row"><div id="presets" class="row" style="margin:0"></div><a id="export" class="file" href="/preset.param" download>Export</a><label class="file">Import<input type="file" accept=".json,application/json" onchange="importFile(this)" hidden></label></div>
 <div class="row"><span class="lbl">Vol</span><input type="range" id="vol" class="gain" min="-80" max="0" step="0.5" value="-60" oninput="sendVol(this.value)"><span class="gv" id="volv"></span></div>
 <h2>Buses</h2>
 <div id="buslinks"></div>
@@ -94,15 +95,15 @@ function load(){
   return Promise.all([
    fetch("/matrix").then(function(r){return r.json();}).then(function(s){if(n<seen)return;seen=n;st=s;activePreset=s.preset;draw();})
     .catch(function(){say("Cannot read the matrix");}),
-   fetch("/mvol").then(function(r){return r.json();}).then(function(v){mv=v.vol;showVol(v.vol);}).catch(function(){})]);
+   fetch("/mvol").then(function(r){return r.json();}).then(function(v){if(!vt)showVol(v.vol);}).catch(function(){})]);  // not under a drag
 }
 function showVol(v){
   document.getElementById("vol").value=v;
   document.getElementById("volv").textContent=parseFloat(v).toFixed(1)+" dB";
 }
-var vt=0,vp=null,mv=null;
+// The master volume is global, not part of a Preset: it is sent during a Preset switch too.
+var vt=0,vp=null;
 function sendVol(v){  // while dragging: at once, then at most every 100 ms with the latest value
-  if(switching)return;  // the reload puts the slider back on the loaded volume
   showVol(v);vp=v;if(vt)return;
   var go=function(){var x=vp;vp=null;if(x===null){vt=0;return;}
     fetch("/mvol",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({vol:parseFloat(x)})});
@@ -113,17 +114,34 @@ function drawPresets(cur){
   var h="";for(var i=0;i<4;i++)h+="<button class='"+(i==cur?"on":"")+"' onclick='preset("+i+")'>"+"ABCD"[i]+"</button>";
   document.getElementById("presets").innerHTML=h;
 }
-// From the click until the state has been reloaded no edit is sent: edits made meanwhile, and a
-// master volume value still waiting for the throttle, are dropped rather than sent to the new Preset.
+// From the click until the state has been reloaded no Preset edit is sent: edits made meanwhile
+// are dropped rather than sent to the new Preset.
 var switching=false;
 function preset(p){
   if(switching)return;
-  switching=true;clearTimeout(vt);vt=0;vp=null;
+  switching=true;
   say("Switching preset...");
   fetch("/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pre:p})})
    .then(function(r){return r.text().then(function(t){if(!r.ok)throw new Error(t||"Preset switch failed");});})
    .then(waitIdle).then(function(){say("");},function(e){say(e.message);})
-   .then(load).then(function(){switching=false;if(mv!==null)showVol(mv);});  // a drag meanwhile moved the thumb
+   .then(load).then(function(){switching=false;});
+}
+// Import replaces the active Preset with a Preset file (the inverse of Export); the firmware
+// writes the difference and Autosave stores it. Edits wait for the reply like during a switch.
+function importFile(el){
+  var f=el.files&&el.files[0];el.value="";  // the same file can be chosen again
+  if(f)f.text().then(importPreset);
+}
+function importPreset(text){
+  if(switching)return;
+  switching=true;
+  say("Importing preset...");
+  fetch("/matrix/import?preset="+activePreset,{method:"POST",headers:{"Content-Type":"application/json"},body:text})
+   .then(function(r){return r.text().then(function(t){
+     if(!r.ok){say("Import failed: "+t);if(r.status==409)return load();return;}
+     seen=++seq;st=JSON.parse(t);activePreset=st.preset;draw();say("Preset imported");});},
+    function(){say("Import failed: no answer from the DSP");})
+   .then(function(){switching=false;});
 }
 // Sends a patch, the reply is the new state or the reason it was refused.
 function send(ch,idx,f){

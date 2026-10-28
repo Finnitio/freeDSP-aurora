@@ -131,6 +131,7 @@ async function main() {
     "a coeffs reply for the previously opened Channel is not plotted for the new one");
   await commitTests();
   await switchTests();
+  await exportImportTests();
   console.log("matrix page tests passed");
 }
 
@@ -380,32 +381,37 @@ async function switchTests() {
   context.draw();
 
   // Matrix page: the master volume slider is being dragged when Preset B is clicked.
+  // The volume is global (not part of a Preset), so the drag goes on through the switch.
   context.sendVol("-20");
   context.sendVol("-19");  // waits for the 100 ms throttle
   assert.deepStrictEqual(sent.map((x) => x.body.vol), [-20]);
   sent.length = 0;
   context.preset(1);
   tick();  // the throttle runs out during the switch
+  assert.deepStrictEqual(sent.map((x) => x.body), [{ vol: -19 }],
+    "the throttled volume is still sent during the switch");
   context.sendVol("-18");  // still dragging
   tick();
+  vol = -18;
+  assert.deepStrictEqual(sent.map((x) => x.body), [{ vol: -19 }, { vol: -18 }]);
+  sent.length = 0;
   const g = input("gout0");
   focus(g);
   type(g, "-1");
   key(g, "Enter");  // a Commit during the switch
   focus(null);
   context.send("out", 0, { mute: true });  // a click during the switch
-  assert.deepStrictEqual(sent, [], "no edit is sent while the preset switches");
+  assert.deepStrictEqual(sent, [], "no Preset edit is sent while the preset switches");
 
   state = sample();
   state.preset = 1;
   state.outs[0].gain = -10;
-  vol = -30;
   held(res(true, 200, ""));
   await settle();
   tick();
   await settle();
   assert.deepStrictEqual(sent, [], "edits from before or during the switch are dropped, not replayed");
-  assert.strictEqual(els.vol.value, -30, "the slider shows the new preset's volume");
+  assert.strictEqual(Number(els.vol.value), -18,"the switch leaves the dragged volume where it is");
   assert.strictEqual(input("gout0").value, "-10", "the field shows the new preset's gain");
 
   // After the reload, edits resume and are tagged with the new Preset.
@@ -447,6 +453,85 @@ async function switchTests() {
   assert.deepStrictEqual(sent.map((x) => x.body),
     [{ ch: "out", idx: 0, preset: 1, slot: { op: "set", i: 0, freq: 800 } }]);
   focus(null);
+}
+
+// ---- Autosave is the only save: Export/Import of a Preset file is the only manual save/load.
+async function exportImportTests() {
+  const main = header.match(/<div id="main">([\s\S]*?)\n<\/div>\n<div id="flt"/);
+  assert(main, "matrix main area not found");
+  assert(!/\b(store|save)\b/i.test(main[1]), "the matrix page has no store/save control");
+  assert(!/["']\/store["']/.test(script[1]), "the matrix page never posts /store");
+  const exp = main[1].match(/<a\b[^>]*id="export"[^>]*>/);
+  assert(exp, "the matrix page offers Export");
+  assert(/href="\/preset\.param"/.test(exp[0]) && /\bdownload\b/.test(exp[0]),
+    "Export downloads the active Preset from /preset.param");
+  assert(/<input\b[^>]*type="file"[^>]*onchange="importFile\(this\)"/.test(main[1]),
+    "the matrix page offers Import of a Preset file");
+
+  const sent = [];
+  let held = null, state = sample();
+  const res = (ok, status, text) => ({ ok, status, text: () => Promise.resolve(text), json: () => Promise.resolve(JSON.parse(text)) });
+  context.fetch = (url, options) => {
+    const post = options && options.method == "POST";
+    if (url.startsWith("/matrix/import")) {
+      sent.push({ url, body: options.body });
+      return new Promise((r) => { held = r; });
+    }
+    if (!post) {
+      if (url == "/matrix") return Promise.resolve(res(true, 200, JSON.stringify(state)));
+      if (url == "/mvol") return Promise.resolve(res(true, 200, JSON.stringify({ vol: -18 })));
+      return Promise.resolve(res(true, 200, JSON.stringify({ pre: state.preset })));
+    }
+    sent.push({ url, body: JSON.parse(options.body) });
+    return Promise.resolve(res(true, 200, JSON.stringify(state)));
+  };
+  const settle = async () => { for (let i = 0; i < 10; i++) await flush(); };
+  context.closeF();
+  context.st = sample();
+  context.activePreset = 2;
+  context.draw();
+
+  // Import: the file goes to the active Preset; no Preset edit is sent until it is applied.
+  const file = '{"v":4,"buses":[],"outs":[]}';
+  context.importPreset(file);
+  assert.deepStrictEqual(sent, [{ url: "/matrix/import?preset=2", body: file }]);
+  sent.length = 0;
+  context.send("out", 0, { mute: true });
+  assert.deepStrictEqual(sent, [], "no edit is sent while the import is applied");
+  const imported = sample();
+  imported.outs[0].gain = -12;
+  held(res(true, 200, JSON.stringify(imported)));
+  await settle();
+  assert.strictEqual(input("gout0").value, "-12", "the page shows the imported Preset");
+  assert.strictEqual(els.msg.textContent, "Preset imported");
+  context.send("out", 0, { mute: true });
+  await settle();
+  assert.deepStrictEqual(sent.map((x) => x.body), [{ ch: "out", idx: 0, preset: 2, mute: true }],
+    "edits resume after the import");
+  sent.length = 0;
+
+  // A rejected file: the reason is shown and the state stays.
+  context.st = sample();
+  context.draw();
+  context.importPreset("not json");
+  sent.length = 0;
+  held(res(false, 400, "preset is not valid JSON"));
+  await settle();
+  assert.strictEqual(els.msg.textContent, "Import failed: preset is not valid JSON");
+  assert.strictEqual(input("gout0").value, "-6", "a rejected import keeps the shown state");
+  context.send("out", 0, { mute: true });
+  await settle();
+  assert.strictEqual(sent.length, 1, "edits resume after a rejected import");
+  sent.length = 0;
+
+  // The file input hands the chosen file's text to the import and is cleared for the next one.
+  const picker = { files: [{ text: () => Promise.resolve(file) }], value: "C:\\fakepath\\a.json" };
+  context.importFile(picker);
+  await settle();
+  assert.deepStrictEqual(sent, [{ url: "/matrix/import?preset=2", body: file }]);
+  assert.strictEqual(picker.value, "");
+  held(res(true, 200, JSON.stringify(sample())));
+  await settle();
 }
 
 main().catch((error) => {
