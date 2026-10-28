@@ -52,25 +52,27 @@ public:
   // Non-blocking variants for loop(): return false (nothing drawn) if the bus is busy.
   bool tryDrawUI(const char* plugin, const char* ip, const int currentPreset, float vol, int editMode = 0)
   {
-    if(!i2cTryLock())
-      return false;
-    if(pDisplayDriver)
-      pDisplayDriver->drawUI(plugin, ip, currentPreset, vol, editMode);
-    i2cUnlock();
-    return true;
+    return tryDraw([&]() { pDisplayDriver->drawUI(plugin, ip, currentPreset, vol, editMode); });
   }
 
   bool tryDrawSwitchingPreset(void)
   {
+    return tryDraw([&]() { pDisplayDriver->drawSwitchingPreset(); });
+  }
+
+private:
+  // Runs draw() if the bus is free right now; false if it is busy.
+  template<typename Draw>
+  bool tryDraw(Draw draw)
+  {
     if(!i2cTryLock())
       return false;
     if(pDisplayDriver)
-      pDisplayDriver->drawSwitchingPreset();
+      draw();
     i2cUnlock();
     return true;
   }
 
-private:
   DisplayDriver* pDisplayDriver = nullptr;
 };
 

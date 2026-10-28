@@ -203,6 +203,12 @@ static String uiStatusLine( void )
   return String( line );
 }
 
+// The edit modes the main UI shows (volume, Preset, virtual input).
+static bool editModeHasUI( void )
+{
+  return (editMode == 0) || (editMode == 1) || (editMode == 2);
+}
+
 //==============================================================================
 /*! Updates the user interface on the display. Waits for the bus, so it is for
  *  setup() and the I2C worker's jobs (including the web handlers' jobs posted
@@ -212,7 +218,7 @@ void updateUI( void )
 {
   if(haveDisplay)
   {
-    if( (editMode == 0) || (editMode == 1) || (editMode == 2) )
+    if( editModeHasUI() )
       myDisplay.drawUI(currentPlugInName.c_str(), uiStatusLine().c_str(), currentPreset, masterVolume.val, editMode);
   }
 }
@@ -223,7 +229,7 @@ static bool tryDrawScreen( PendingRedraw::Screen screen )
     return true;
   if( screen == PendingRedraw::SWITCHING_PRESET )
     return myDisplay.tryDrawSwitchingPreset();
-  if( (editMode == 0) || (editMode == 1) || (editMode == 2) )
+  if( editModeHasUI() )
     return myDisplay.tryDrawUI(currentPlugInName.c_str(), uiStatusLine().c_str(), currentPreset, masterVolume.val, editMode);
   return true;
 }
