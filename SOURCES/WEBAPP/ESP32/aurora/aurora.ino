@@ -205,7 +205,8 @@ static String uiStatusLine( void )
 
 //==============================================================================
 /*! Updates the user interface on the display. Waits for the bus, so it is for
- *  setup() and worker jobs; loop() requests a redraw from pendingRedraw instead.
+ *  setup() and the I2C worker's jobs (including the web handlers' jobs posted
+ *  there); loop() requests a redraw from pendingRedraw instead.
  */
 void updateUI( void )
 {
