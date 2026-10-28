@@ -153,7 +153,8 @@ public:
    *  H(z) = (b0+b1 z^-1+b2 z^-2) / (1-a1 z^-1-a2 z^-2). "" if there is no such Channel. */
   std::string coeffsJson( const char* ch, int idx ) const;
 
-  /*! Versioned preset JSON, and its inverse. loadPreset() returns "" or the reason.
+  /*! Versioned preset JSON (with the Add-on B config as optional "addon": [addr, reg, data]
+   *  when it is set; only importPreset() applies it), and its inverse. loadPreset() returns "" or the reason.
    *  On success it writes only the blocks that differ from the current state (each
    *  biquad, gain, delay, polarity, route, Source, SPDIF out), with no ramp; the gain
    *  write of a Channel in the ramp set (if its gain differs) comes after all other
@@ -172,6 +173,10 @@ public:
    *  addOn: the new Preset's Add-on B config; written (between the difference and the
    *  ramp up) only if it differs from the current one. NULL or not set: keep the current one. */
   std::string switchPreset( const std::string& json, const MatrixAddOn* addOn = NULL );
+  struct ParsedPreset;
+  /*! The same with a file checked by parsePreset() (the file's own Add-on B config is
+   *  ignored here: a switch takes it from addOn). */
+  void switchPreset( const ParsedPreset& file, const MatrixAddOn* addOn = NULL );
   void switchToDefaults( const MatrixAddOn* addOn = NULL );
 
   /*! The Add-on B config on the hardware, e.g. as written at boot; no write, not a change. */
@@ -179,11 +184,19 @@ public:
   /*! The active Preset's Add-on B config, stored by Autosave next to the Preset. */
   const MatrixAddOn& addOn( void ) const { return addOn_; }
 
+  /*! Checks a Preset file without touching the model (no writes, no lock needed: it only
+   *  reads the limits fixed at construction). Parses in place: json (NUL-terminated) is
+   *  modified. The JSON document is bounded by the largest valid Preset of this Plugin,
+   *  whatever the file size. Returns "" or the reason. */
+  std::string parsePreset( char* json, ParsedPreset& out ) const;
+
   /*! Import of an exported Preset file into the active Preset: writes like switchPreset()
-   *  and marks the model changed at nowMs, so Autosave stores it. preset is the Preset
-   *  the import was made against; another one, or a Preset switch in progress, is a
-   *  conflict. A rejected import changes and writes nothing; undo() takes an accepted
-   *  one back (model only). */
+   *  (the file's Add-on B config, if it has one, like the addOn argument) and marks the
+   *  model changed at nowMs, so Autosave stores it. preset is the Preset the import was
+   *  made against; another one, or a Preset switch in progress, is a conflict. A rejected
+   *  import changes and writes nothing and keeps the undo record; undo() takes an
+   *  accepted one back (model only). The string form parses first. */
+  MatrixEditResult importPreset( const ParsedPreset& file, int preset, uint32_t nowMs );
   MatrixEditResult importPreset( const std::string& json, int preset, uint32_t nowMs );
 
   /*! Writes the whole state to the DSP: the Baseline after the DSP program is loaded. */
@@ -261,6 +274,8 @@ private:
   void writeDiff( const Snapshot& before, uint32_t spdifBefore, MatrixRampSet* ramp, bool shared,
                   const MatrixAddOn* addOn = NULL );
   std::string load( const std::string& json, MatrixRampSet* ramp, bool shared, const MatrixAddOn* addOn = NULL );
+  void applyParsed( const ParsedPreset& p, MatrixRampSet* ramp, bool shared, const MatrixAddOn* addOn );
+  size_t presetDocCapacity( void ) const;
   void resetTo( MatrixRampSet* ramp, bool shared, const MatrixAddOn* addOn = NULL );
   void putChannel( JsonArray arr, const Channel& c, const char* selKey, bool withLimits ) const;
   std::string readChannel( JsonObject o, bool isBus, Channel& c ) const;
@@ -291,6 +306,18 @@ private:
     bool dirty;
     uint32_t lastChange;
   } undo_;
+
+public:
+  /*! A Preset file checked by parsePreset(), ready for switchPreset() or importPreset(). */
+  struct ParsedPreset
+  {
+    Channel bus[MATRIX_MAX_BUS];
+    Channel out[MATRIX_MAX_OUT];
+    LinkGroup busLink;
+    LinkGroup outLink[MATRIX_OUT_LINKS];
+    uint32_t spdif;
+    MatrixAddOn addOn;  // the file's optional "addon"; not set: keep the current config
+  };
 };
 
 #endif

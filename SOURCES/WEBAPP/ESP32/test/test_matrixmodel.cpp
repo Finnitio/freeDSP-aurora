@@ -1991,6 +1991,20 @@ static void invalidImportIsRejectedWithoutChangingState()
   assert(port.log.empty() && m.savePreset() == before && !m.dirty());
 }
 
+// The firmware may still need to take back the last accepted edit (its writes could not
+// be queued); a rejected import in between must not lose that.
+static void rejectedImportKeepsTheUndoOfTheLastEdit()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  const std::string before = m.savePreset();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":-3}", 100).empty());
+  assert(m.importPreset("not json", 0, 200).status == MATRIX_EDIT_BAD_REQUEST);
+  assert(m.importPreset(before, 1, 200).status == MATRIX_EDIT_CONFLICT);
+  m.undo();
+  assert(m.savePreset() == before);
+}
+
 static void importDuringASwitchOrForAnotherPresetIsAConflict()
 {
   OrderPort port;
@@ -2082,6 +2096,118 @@ static void addOnEditIsWrittenAndAutosaved()
   assert(port.log.empty() && m.addOn() == kMuxSpdif2);
 }
 
+// Export carries the Add-on B config of the Preset; Import applies it like a switch does.
+static void exportAndImportCarryTheAddOnConfig()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  const std::string plain = m.savePreset();
+  assert(plain.find("addon") == std::string::npos);  // no Add-on B: nothing to carry
+  m.setAddOn(kMuxSpdif2);
+  const std::string withMux = m.savePreset();
+  assert(withMux.find("\"addon\":[64,1,2]") != std::string::npos);
+
+  m.setAddOn(kMuxSpdif1);
+  port.log.clear();
+  assert(m.importPreset(withMux, 0, 1000).ok());
+  assert(port.log == lines({ "a 40 01 02" }) && m.addOn() == kMuxSpdif2 && m.dirty());
+  m.undo();
+  assert(m.addOn() == kMuxSpdif1);
+
+  // a file without it keeps the current config
+  port.log.clear();
+  assert(m.importPreset(plain, 0, 2000).ok());
+  assert(port.log.empty() && m.addOn() == kMuxSpdif1);
+}
+
+static void importWithABadAddOnConfigIsRejectedWithoutChangingState()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  m.setAddOn(kMuxSpdif1);
+  const std::string before = m.savePreset();
+  const std::string good = presetWith(m, 2, "{\"ch\":\"out\",\"idx\":0,\"mute\":false}");
+  const std::string key = "\"spdif\":";
+  const char* bad[] = { "\"addon\":[64,1,256],", "\"addon\":[64,1],", "\"addon\":\"x\"," };
+  port.log.clear();
+  for (const char* addon : bad)
+  {
+    std::string file = good;
+    file.insert(file.find(key), addon);
+    const MatrixEditResult r = m.importPreset(file, 0, 1000);
+    assert(r.status == MATRIX_EDIT_BAD_REQUEST && !r.reason.empty());
+  }
+  assert(port.log.empty() && m.savePreset() == before && m.addOn() == kMuxSpdif1 && !m.dirty());
+}
+
+// The import is parsed (the costly part) without touching the model, so the firmware can
+// do it outside the model lock; the document is bounded by the largest valid Preset.
+static void parsingAPresetFileLeavesTheModelAlone()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  std::string file = presetWith(m, 2, "{\"ch\":\"out\",\"idx\":2,\"gain\":-4}");
+  const std::string before = m.savePreset();
+  MatrixModel::ParsedPreset parsed;
+  port.log.clear();
+  assert(m.parsePreset(&file[0], parsed).empty());
+  assert(port.log.empty() && m.savePreset() == before);
+  assert(m.importPreset(parsed, 0, 1000).ok());
+  assert(m.savePreset() != before);
+}
+
+static void largestPresetLoadsAndABloatedFileIsRejected()
+{
+  const int nbiquad = 30;  // MAX_MATRIX_BIQUAD
+  FakePort port;
+  MatrixModel full(port, 2, 8, nbiquad, MATRIX_MAX_DELAY_SAMPLES);
+  full.setAddOn(kMuxSpdif2);
+  char json[256];
+  for (int b = 0; b < 2; b++)
+    for (int k = 0; k < nbiquad; k++)
+    {
+      snprintf(json, sizeof(json), "{\"ch\":\"bus\",\"idx\":%d,\"slot\":{\"op\":\"add\",\"freq\":%d,\"q\":1.5,\"gain\":-3}}", b, 100 + k);
+      assert(patch(full, json).empty());
+    }
+  for (int o = 0; o < 8; o++)
+  {
+    snprintf(json, sizeof(json), "{\"ch\":\"out\",\"idx\":%d,\"name\":\"0123456789abcdef\",\"link\":\"A\",\"polarity\":true,\"delayUs\":1000}", o);
+    assert(patch(full, json).empty());
+    for (int k = 0; k < nbiquad; k++)
+    {
+      snprintf(json, sizeof(json), "{\"ch\":\"out\",\"idx\":%d,\"slot\":{\"op\":\"add\",\"type\":\"hshelf\",\"freq\":%d,\"gain\":2,\"slope\":0.5}}", o, 200 + k);
+      assert(patch(full, json).empty());
+    }
+  }
+  const std::string file = full.savePreset();
+  FakePort port2;
+  MatrixModel m(port2, 2, 8, nbiquad, MATRIX_MAX_DELAY_SAMPLES);
+  assert(m.importPreset(file, 0, 0).ok());
+  assert(m.savePreset() == file);
+
+  // a hand-written version 1 file with the shortest keys and every Slot taken loads too
+  std::string slots;
+  for (int k = 0; k < nbiquad; k++)
+    slots += std::string(k ? "," : "") + "{\"freq\":1e3,\"q\":1,\"gain\":0,\"bypass\":true}";
+  std::string terse = "{\"v\":1,\"buses\":[";
+  for (int b = 0; b < 2; b++)
+    terse += std::string(b ? "," : "") + "{\"name\":\"\",\"mute\":true,\"gain\":0,\"source\":0,\"slots\":[" + slots + "]}";
+  terse += "],\"outs\":[";
+  for (int o = 0; o < 8; o++)
+    terse += std::string(o ? "," : "") + "{\"name\":\"\",\"mute\":true,\"gain\":0,\"route\":0,\"slots\":[" + slots + "]}";
+  terse += "]}";
+  assert(m.importPreset(terse, 0, 0).ok());
+
+  // the same size, but far more JSON values than any valid Preset: refused, not retried bigger
+  std::string bloated = "{\"v\":3,\"x\":[";
+  while (bloated.size() < file.size()) bloated += "0,";
+  bloated += "0]}";
+  const std::string before = m.savePreset();
+  const MatrixEditResult r = m.importPreset(bloated, 0, 0);
+  assert(r.status == MATRIX_EDIT_BAD_REQUEST && r.reason == "preset is too large");
+  assert(m.savePreset() == before);
+}
+
 int main()
 {
   editResultsDistinguishSuccessBadRequestAndConflict();
@@ -2165,10 +2291,15 @@ int main()
   switchToDefaultsTakesTheSharedRamp();
   importReplacesTheActivePresetThroughTheSharedRampAndIsAutosaved();
   invalidImportIsRejectedWithoutChangingState();
+  rejectedImportKeepsTheUndoOfTheLastEdit();
   importDuringASwitchOrForAnotherPresetIsAConflict();
   undoRevertsAnImport();
   presetSwitchWritesTheAddOnConfigOnlyWhenItDiffers();
   addOnEditIsWrittenAndAutosaved();
+  exportAndImportCarryTheAddOnConfig();
+  importWithABadAddOnConfigIsRejectedWithoutChangingState();
+  parsingAPresetFileLeavesTheModelAlone();
+  largestPresetLoadsAndABloatedFileIsRejected();
   printf("all tests passed\n");
   return 0;
 }

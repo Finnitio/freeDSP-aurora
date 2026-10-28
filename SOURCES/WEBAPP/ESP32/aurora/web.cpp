@@ -1961,7 +1961,8 @@ void setupWebserver (void)
         request->send( 400, "text/plain", "missing preset" );
         return;
       }
-      const MatrixEditResult edit = matrixImport( std::string( body, total ), request->getParam( "preset" )->value().toInt() );
+      // in place: no copy of the up to 32 KB body (bodyChunk() NUL-terminated it)
+      const MatrixEditResult edit = matrixImport( body, request->getParam( "preset" )->value().toInt() );
       if( edit.ok() )
         request->send( 200, "application/json", matrixState().c_str() );
       else

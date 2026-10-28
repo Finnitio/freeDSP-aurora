@@ -147,7 +147,7 @@ void writePresetFile( uint8_t preset, const std::string& json )
 MatrixAddOn readAddOnFile( uint8_t preset )
 {
   MatrixAddOn cfg = MatrixAddOn();
-  if( Settings.addonid != ADDON_B )
+  if( Settings.addonid != ADDON_B || preset >= MAX_NUM_PRESETS )
     return cfg;
   File f = SPIFFS.open( presetAddonCfgFile[preset], "r" );
   if( !f )
@@ -281,6 +281,9 @@ void matrixLoadPreset( void )
     f.read( (uint8_t*)&json[0], json.size() );
     f.close();
   }
+  // parsed before the lock (it does not touch the model), in place: json is not needed after
+  MatrixModel::ParsedPreset file;
+  const std::string err = json.empty() ? "no preset file" : model->parsePreset( &json[0], file );
 
   const MatrixAddOn addOn = readAddOnFile( currentPreset );  // not set: keep the current config
 
@@ -298,9 +301,10 @@ void matrixLoadPreset( void )
     }
     port.ops.clear();
     // only the difference, inside the shared ramp; a failed load writes nothing
-    std::string err = json.empty() ? "no preset file" : model->switchPreset( json, &addOn );
     keepStored = false;
-    if( !err.empty() )
+    if( err.empty() )
+      model->switchPreset( file, &addOn );
+    else
     {
       Serial.print( F("matrix: using defaults: ") );
       Serial.println( err.c_str() );
@@ -337,13 +341,20 @@ MatrixEditResult matrixApply( JsonObject patch, std::string& state )
   return result;
 }
 
-MatrixEditResult matrixImport( const std::string& json, int preset )
+MatrixEditResult matrixImport( char* json, int preset )
 {
   if( !model )
     return { MATRIX_EDIT_BAD_REQUEST, "not a matrix plugin" };
+  // The costly parse needs no lock: the worker and loop() go on meanwhile.
+  MatrixModel::ParsedPreset file;
+  const std::string reason = model->parsePreset( json, file );
+  if( !reason.empty() )
+    return { MATRIX_EDIT_BAD_REQUEST, reason };
+  if( Settings.addonid != ADDON_B )
+    file.addOn = MatrixAddOn();  // no SPDIF mux to write the file's config to
   ModelLock lock;  // as matrixApply(): the post stays under the lock
   port.ops.clear();
-  MatrixEditResult result = model->importPreset( json, preset, millis() );
+  MatrixEditResult result = model->importPreset( file, preset, millis() );
   if( !result.ok() )
     return result;
   std::vector<Op> ops;

@@ -46,9 +46,11 @@ MatrixEditResult matrixApply( JsonObject patch, std::string& state );
 
 /*! Import of an exported Preset file (Export's inverse) into the active Preset, made
  *  against Preset `preset`: the difference inside the shared ramp, then Autosave
- *  (MatrixModel::importPreset). Accepted, bad request or conflict like matrixApply();
- *  the DSP writes are queued for the I2C worker, so this is safe in a web handler. */
-MatrixEditResult matrixImport( const std::string& json, int preset );
+ *  (MatrixModel::importPreset). The file's Add-on B config is applied only with Add-on B.
+ *  Accepted, bad request or conflict like matrixApply(); the DSP writes are queued for
+ *  the I2C worker, so this is safe in a web handler. json (NUL-terminated) is parsed in
+ *  place, outside the model lock, and is changed by the call. */
+MatrixEditResult matrixImport( char* json, int preset );
 
 /*! Export: the active Preset as a Preset file, including changes Autosave has not stored yet. */
 std::string matrixPresetJson( void );

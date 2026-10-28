@@ -8,6 +8,22 @@
 static std::string toString( const JsonDocument& doc );
 
 static const int kPresetVersion = 3;
+
+/*! Add-on B config [addr, reg, data] (bytes 0-255) of a patch or a Preset file; NULL or the reason. */
+static const char* readAddOn( JsonArray i2c, MatrixAddOn& cfg )
+{
+  if( i2c.size() != 3 )
+    return "addon needs i2c [addr, reg, data]";
+  uint8_t v[3];
+  for( int i = 0; i < 3; i++ )
+  {
+    if( !i2c[i].is<long>() || i2c[i].as<long>() < 0 || i2c[i].as<long>() > 255 )
+      return "addon i2c bytes must be 0-255";
+    v[i] = (uint8_t)i2c[i].as<long>();
+  }
+  cfg = { true, v[0], v[1], v[2] };
+  return NULL;
+}
 static const float kSampleRate = 48000.0f;
 static const float kFreqMin = 20.0f, kFreqMax = 20000.0f;
 static const float kQMin = 0.1f, kQMax = 20.0f;
@@ -715,17 +731,10 @@ std::string MatrixModel::applyPatch( JsonObject patch, uint32_t nowMs )
   }
   if( strcmp( kind, "addon" ) == 0 )
   {
-    JsonArray i2c = patch["i2c"];
-    if( i2c.size() != 3 )
-      return "addon needs i2c [addr, reg, data]";
-    uint8_t v[3];
-    for( int i = 0; i < 3; i++ )
-    {
-      if( !i2c[i].is<long>() || i2c[i].as<long>() < 0 || i2c[i].as<long>() > 255 )
-        return "addon i2c bytes must be 0-255";
-      v[i] = (uint8_t)i2c[i].as<long>();
-    }
-    const MatrixAddOn cfg = { true, v[0], v[1], v[2] };
+    MatrixAddOn cfg;
+    const char* err = readAddOn( patch["i2c"], cfg );
+    if( err )
+      return err;
     saveUndo();
     if( cfg != addOn_ )
     {
@@ -1112,6 +1121,13 @@ std::string MatrixModel::savePreset( void ) const
   DynamicJsonDocument doc( 5120 + 256 * slotCount() );
   doc["v"] = kPresetVersion;
   doc["spdif"] = (long)spdif_;
+  if( addOn_.set )
+  {
+    JsonArray addon = doc.createNestedArray( "addon" );
+    addon.add( addOn_.addr );
+    addon.add( addOn_.reg );
+    addon.add( addOn_.data );
+  }
   JsonObject links = doc.createNestedObject( "links" );
   JsonObject busLink = links.createNestedObject( "bus" );
   busLink["mute"] = busLink_.mute; busLink["filters"] = busLink_.filters; busLink["gain"] = busLink_.gain;
@@ -1237,20 +1253,31 @@ std::string MatrixModel::switchPreset( const std::string& json, const MatrixAddO
   return load( json, NULL, true, addOn );
 }
 
+void MatrixModel::switchPreset( const ParsedPreset& file, const MatrixAddOn* addOn )
+{
+  applyParsed( file, NULL, true, addOn );
+}
+
 MatrixEditResult MatrixModel::importPreset( const std::string& json, int preset, uint32_t nowMs )
+{
+  std::vector<char> buf( json.begin(), json.end() );
+  buf.push_back( '\0' );
+  ParsedPreset file;
+  const std::string reason = parsePreset( buf.data(), file );
+  if( !reason.empty() )
+    return { MATRIX_EDIT_BAD_REQUEST, reason };
+  return importPreset( file, preset, nowMs );
+}
+
+MatrixEditResult MatrixModel::importPreset( const ParsedPreset& file, int preset, uint32_t nowMs )
 {
   if( preset != preset_ )
     return { MATRIX_EDIT_CONFLICT, "preset changed; refresh the matrix" };
   if( presetSwitching_ )
     return { MATRIX_EDIT_CONFLICT, "preset switch in progress" };
   saveUndo();
-  std::string reason = json.empty() ? "empty preset file" : switchPreset( json );
-  if( !reason.empty() )
-  {
-    undo_.valid = false;  // nothing changed, so there is nothing to take back
-    return { MATRIX_EDIT_BAD_REQUEST, reason };
-  }
-  undo_.valid = true;  // load() dropped it; the snapshot from before the import still holds
+  applyParsed( file, NULL, true, &file.addOn );
+  undo_.valid = true;  // applyParsed() dropped it; the snapshot from before the import still holds
   dirty_ = true;
   lastChange_ = nowMs;
   return { MATRIX_EDIT_OK, "" };
@@ -1258,21 +1285,45 @@ MatrixEditResult MatrixModel::importPreset( const std::string& json, int preset,
 
 std::string MatrixModel::load( const std::string& json, MatrixRampSet* ramp, bool shared, const MatrixAddOn* addOn )
 {
-  // a smaller document usually fits; the 4x one only when that ran out of memory
-  DynamicJsonDocument docS( 2 * json.size() + 1024 );
-  DeserializationError jerr = deserializeJson( docS, json.c_str() );
-  DynamicJsonDocument* big = NULL;
-  if( jerr == DeserializationError::NoMemory )
-  {
-    big = new DynamicJsonDocument( 4 * json.size() + 1024 );
-    jerr = deserializeJson( *big, json.c_str() );
-  }
-  struct Free { DynamicJsonDocument* p; ~Free() { delete p; } } freeBig = { big };
-  if( jerr == DeserializationError::NoMemory )
+  std::vector<char> buf( json.begin(), json.end() );
+  buf.push_back( '\0' );
+  ParsedPreset p;
+  const std::string err = parsePreset( buf.data(), p );
+  if( !err.empty() )
+    return err;
+  applyParsed( p, ramp, shared, addOn );
+  return "";
+}
+
+/*! Upper bound of the JSON document of a valid Preset file of this Plugin, parsed in
+ *  place (no string copies): the keys savePreset() writes, with some room for the
+ *  optional ones of older versions, and nbiquad_ Slots per Channel. */
+size_t MatrixModel::presetDocCapacity( void ) const
+{
+  const size_t slot = JSON_OBJECT_SIZE( 10 );
+  const size_t channel = JSON_OBJECT_SIZE( 14 ) + JSON_ARRAY_SIZE( nbiquad_ ) + nbiquad_ * slot;
+  const size_t links = JSON_OBJECT_SIZE( 2 ) + JSON_OBJECT_SIZE( 4 ) + JSON_ARRAY_SIZE( MATRIX_OUT_LINKS )
+                     + MATRIX_OUT_LINKS * JSON_OBJECT_SIZE( 5 );
+  return JSON_OBJECT_SIZE( 8 ) + links + JSON_ARRAY_SIZE( 3 ) + JSON_ARRAY_SIZE( nbus_ ) + JSON_ARRAY_SIZE( nout_ )
+       + ( nbus_ + nout_ ) * channel;
+}
+
+std::string MatrixModel::parsePreset( char* json, ParsedPreset& out ) const
+{
+  if( !json || !*json )
+    return "empty preset file";
+  // In place, a member of a Preset file takes one pool slot per at least 6 characters
+  // ("q":1,); one per 4 leaves room, and a small file needs no document of the largest
+  // Preset. One try only: a failed parse has changed json.
+  const size_t bySize = ( strlen( json ) / 4 + 64 ) * JSON_ARRAY_SIZE( 1 );
+  DynamicJsonDocument doc( bySize < presetDocCapacity() ? bySize : presetDocCapacity() );
+  if( doc.capacity() == 0 )
     return "not enough memory for the preset";
+  const DeserializationError jerr = deserializeJson( doc, json );
+  if( jerr == DeserializationError::NoMemory )
+    return "preset is too large";
   if( jerr )
     return "preset is not valid JSON";
-  DynamicJsonDocument& doc = big ? *big : docS;
   const int version = doc["v"] | 0;
   if( version < 1 || version > kPresetVersion )  // version 1 (PEQ-only Slots) still loads
     return "unknown preset version";
@@ -1281,16 +1332,22 @@ std::string MatrixModel::load( const std::string& json, MatrixRampSet* ramp, boo
   if( (int)buses.size() != nbus_ || (int)outs.size() != nout_ )
     return "preset has the wrong channel count";
 
-  uint32_t spdif = spdifPairCode( 0 );  // optional: presets from before the SPDIF out selector have none
+  out.spdif = spdifPairCode( 0 );  // optional: presets from before the SPDIF out selector have none
   if( doc.containsKey( "spdif" ) )
   {
     if( !doc["spdif"].is<long>() || !spdifPairValid( doc["spdif"].as<long>(), nout_ ) )
       return "bad spdif";
-    spdif = (uint32_t)doc["spdif"].as<long>();
+    out.spdif = (uint32_t)doc["spdif"].as<long>();
   }
 
-  LinkGroup busLink = { false, false, false, false };
-  LinkGroup outLink[MATRIX_OUT_LINKS] = {};
+  out.addOn = MatrixAddOn();  // optional: only with Add-on B, and not in presets from before it
+  if( doc.containsKey( "addon" ) && readAddOn( doc["addon"], out.addOn ) )
+    return "bad addon";
+
+  LinkGroup& busLink = out.busLink;
+  LinkGroup* outLink = out.outLink;
+  busLink = LinkGroup();
+  for( int g = 0; g < MATRIX_OUT_LINKS; g++ ) outLink[g] = LinkGroup();
   if( doc.containsKey( "links" ) )
   {
     JsonObject links = doc["links"];
@@ -1317,31 +1374,34 @@ std::string MatrixModel::load( const std::string& json, MatrixRampSet* ramp, boo
     }
   }
 
-  Channel nb[MATRIX_MAX_BUS], no[MATRIX_MAX_OUT];
   for( int b = 0; b < nbus_; b++ )
   {
-    std::string err = readChannel( buses[b], true, nb[b] );
+    std::string err = readChannel( buses[b], true, out.bus[b] );
     if( !err.empty() )
       return err;
   }
   for( int o = 0; o < nout_; o++ )
   {
-    std::string err = readChannel( outs[o], false, no[o] );
+    std::string err = readChannel( outs[o], false, out.out[o] );
     if( !err.empty() )
       return err;
   }
+  return "";
+}
+
+void MatrixModel::applyParsed( const ParsedPreset& p, MatrixRampSet* ramp, bool shared, const MatrixAddOn* addOn )
+{
   Snapshot before;
   snapshot( before );
   const uint32_t spdifBefore = spdif_;
-  for( int b = 0; b < nbus_; b++ ) bus_[b] = nb[b];
-  for( int o = 0; o < nout_; o++ ) out_[o] = no[o];
-  busLink_ = busLink;
-  for( int g = 0; g < MATRIX_OUT_LINKS; g++ ) outLink_[g] = outLink[g];
-  spdif_ = spdif;
+  for( int b = 0; b < nbus_; b++ ) bus_[b] = p.bus[b];
+  for( int o = 0; o < nout_; o++ ) out_[o] = p.out[o];
+  busLink_ = p.busLink;
+  for( int g = 0; g < MATRIX_OUT_LINKS; g++ ) outLink_[g] = p.outLink[g];
+  spdif_ = p.spdif;
   undo_.valid = false;
   dirty_ = false;
   writeDiff( before, spdifBefore, ramp, shared, addOn );
-  return "";
 }
 
 //==============================================================================
