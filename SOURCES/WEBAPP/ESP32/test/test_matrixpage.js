@@ -125,6 +125,7 @@ async function main() {
   assert.strictEqual(context.cf, null,
     "a coeffs reply for the previously opened Channel is not plotted for the new one");
   await commitTests();
+  await switchTests();
   console.log("matrix page tests passed");
 }
 
@@ -330,6 +331,106 @@ async function commitTests() {
   // Master volume stays a live slider.
   context.sendVol("-20");
   assert.strictEqual(posts.pop().url, "/mvol");
+}
+
+// ---- Preset switch: from the click until the new preset's state has loaded, no edit is sent.
+async function switchTests() {
+  const sent = [];  // edits that reached the network
+  let timers = [], held = null, state = sample(), vol = -60;
+  context.setTimeout = (fn) => { timers.push(fn); return timers.length; };
+  context.clearTimeout = (id) => { if (id) timers[id - 1] = null; };
+  const tick = () => { const t = timers; timers = []; t.forEach((fn) => fn && fn()); };
+  const settle = async () => { for (let i = 0; i < 10; i++) await flush(); };
+  const res = (ok, status, text) => ({ ok, status, text: () => Promise.resolve(text), json: () => Promise.resolve(JSON.parse(text)) });
+  context.fetch = (url, options) => {
+    const post = options && options.method == "POST";
+    if (url == "/preset" && post) return new Promise((r) => { held = r; });
+    if (url == "/idle") return Promise.resolve(res(true, 200, "1"));
+    if (!post) {
+      if (url == "/matrix") return Promise.resolve(res(true, 200, JSON.stringify(state)));
+      if (url == "/mvol") return Promise.resolve(res(true, 200, JSON.stringify({ vol })));
+      return Promise.resolve(res(true, 200, JSON.stringify({ pre: state.preset })));
+    }
+    const body = JSON.parse(options.body);
+    sent.push({ url, body });
+    if (url == "/matrix" && body.preset != state.preset) return Promise.resolve(res(false, 409, "stale preset"));
+    return Promise.resolve(res(true, 200, url == "/matrix" ? JSON.stringify(state) : ""));
+  };
+  context.vt = 0;  // the earlier slider test's throttle timer belonged to the old timer stub
+  focus(null);
+  context.closeF();
+  context.st = sample();
+  context.activePreset = 2;
+  context.draw();
+
+  // Matrix page: the master volume slider is being dragged when preset B is clicked.
+  context.sendVol("-20");
+  context.sendVol("-19");  // waits for the 100 ms throttle
+  assert.deepStrictEqual(sent.map((x) => x.body.vol), [-20]);
+  sent.length = 0;
+  context.preset(1);
+  tick();  // the throttle runs out during the switch
+  context.sendVol("-18");  // still dragging
+  tick();
+  const g = input("gout0");
+  focus(g);
+  type(g, "-1");
+  key(g, "Enter");  // a Commit during the switch
+  focus(null);
+  context.send("out", 0, { mute: true });  // a click during the switch
+  assert.deepStrictEqual(sent, [], "no edit is sent while the preset switches");
+
+  state = sample();
+  state.preset = 1;
+  state.outs[0].gain = -10;
+  vol = -30;
+  held(res(true, 200, ""));
+  await settle();
+  tick();
+  await settle();
+  assert.deepStrictEqual(sent, [], "edits from before or during the switch are dropped, not replayed");
+  assert.strictEqual(els.vol.value, -30, "the slider shows the new preset's volume");
+  assert.strictEqual(input("gout0").value, "-10", "the field shows the new preset's gain");
+
+  // After the reload, edits resume and are tagged with the new preset.
+  context.sendVol("-25");
+  const g2 = input("gout0");
+  focus(g2);
+  type(g2, "-2");
+  key(g2, "Enter");
+  await settle();
+  assert.deepStrictEqual(sent.map((x) => x.body),
+    [{ vol: -25 }, { ch: "out", idx: 0, preset: 1, gain: -2 }]);
+  assert(!sent.some((x) => x.url == "/matrix" && x.body.preset != 1), "the edit is accepted");
+  state.outs[0].gain = -2;
+  focus(null);
+  tick();
+  sent.length = 0;
+
+  // Filter page: a Commit by blur and a click during a switch that fails.
+  context.openF("out", 0);
+  context.preset(3);
+  const freq = input("s0freq");
+  focus(freq);
+  type(freq, "500");
+  focus(null);  // blur commits
+  context.bypass(0, true);
+  assert.deepStrictEqual(sent, [], "no filter edit is sent while the preset switches");
+  held(res(false, 409, "preset switch in progress"));
+  await settle();
+  assert.deepStrictEqual(sent, [], "the dropped Commit is not replayed after a failed switch");
+  assert.strictEqual(context.activePreset, 1, "a failed switch keeps the old preset");
+  assert.strictEqual(input("s0freq").value, "1000", "a failed switch keeps the old preset's values");
+
+  // A failed switch re-enables edits.
+  const f2 = input("s0freq");
+  focus(f2);
+  type(f2, "800");
+  key(f2, "Enter");
+  await settle();
+  assert.deepStrictEqual(sent.map((x) => x.body),
+    [{ ch: "out", idx: 0, preset: 1, slot: { op: "set", i: 0, freq: 800 } }]);
+  focus(null);
 }
 
 main().catch((error) => {

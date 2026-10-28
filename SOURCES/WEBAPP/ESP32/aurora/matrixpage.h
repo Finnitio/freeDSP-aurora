@@ -61,19 +61,22 @@ var st=null,seq=0,seen=0,late=false,view=null,cf=null,cseq=0,csig="",ct=0,active
 function say(t){document.getElementById("msg").textContent=t||"";}
 function waitIdle(){return fetch("/idle").then(function(r){return r.text();}).then(function(t){
   if(t=="1")return;return new Promise(function(r){setTimeout(r,100);}).then(waitIdle);});}
+// Settles once the matrix and the master volume have been read (or failed to).
 function load(){
   var n=++seq;
-  fetch("/matrix").then(function(r){return r.json();}).then(function(s){if(n<seen)return;seen=n;st=s;activePreset=s.preset;draw();})
-   .catch(function(){say("Cannot read the matrix");});
   fetch("/preset").then(function(r){return r.json();}).then(function(p){drawPresets(p.pre);});
-  fetch("/mvol").then(function(r){return r.json();}).then(function(v){showVol(v.vol);});
+  return Promise.all([
+   fetch("/matrix").then(function(r){return r.json();}).then(function(s){if(n<seen)return;seen=n;st=s;activePreset=s.preset;draw();})
+    .catch(function(){say("Cannot read the matrix");}),
+   fetch("/mvol").then(function(r){return r.json();}).then(function(v){mv=v.vol;showVol(v.vol);}).catch(function(){})]);
 }
 function showVol(v){
   document.getElementById("vol").value=v;
   document.getElementById("volv").textContent=parseFloat(v).toFixed(1)+" dB";
 }
-var vt=0,vp=null;
+var vt=0,vp=null,mv=null;
 function sendVol(v){  // while dragging: at once, then at most every 100 ms with the latest value
+  if(switching)return;  // the reload puts the slider back on the loaded volume
   showVol(v);vp=v;if(vt)return;
   var go=function(){var x=vp;vp=null;if(x===null){vt=0;return;}
     fetch("/mvol",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({vol:parseFloat(x)})});
@@ -84,12 +87,17 @@ function drawPresets(cur){
   var h="";for(var i=0;i<4;i++)h+="<button class='"+(i==cur?"on":"")+"' onclick='preset("+i+")'>"+"ABCD"[i]+"</button>";
   document.getElementById("presets").innerHTML=h;
 }
+// From the click until the state has been reloaded no edit is sent: edits made meanwhile, and a
+// master volume value still waiting for the throttle, are dropped rather than sent to the new preset.
+var switching=false;
 function preset(p){
+  if(switching)return;
+  switching=true;clearTimeout(vt);vt=0;vp=null;
   say("Switching preset...");
   fetch("/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pre:p})})
    .then(function(r){return r.text().then(function(t){if(!r.ok)throw new Error(t||"Preset switch failed");});})
-   .then(waitIdle).then(function(){say("");load();})
-   .catch(function(e){say(e.message);load();});
+   .then(waitIdle).then(function(){say("");},function(e){say(e.message);})
+   .then(load).then(function(){switching=false;if(mv!==null)showVol(mv);});  // a drag meanwhile moved the thumb
 }
 // Sends a patch, the reply is the new state or the reason it was refused.
 function send(ch,idx,f){
@@ -97,6 +105,7 @@ function send(ch,idx,f){
   return post(p);
 }
 function post(p){
+  if(switching)return Promise.resolve();
   var n=++seq;  // replies older than one already shown are ignored
   return fetch("/matrix",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)})
    .then(function(r){return r.text().then(function(t){
@@ -121,6 +130,7 @@ function fieldKey(e,el){
 // Text that is no number is sent as null: the firmware's reply names the problem and the field reverts.
 function commit(el){
   var d=el.dataset,x=num(el.value);
+  if(switching){el.value=d.v;return;}  // dropped; the reload shows the loaded value
   if(el.value==d.v||x===num(d.v))return;
   d.v=el.value;  // until the reply: Enter followed by Tab sends once
   var i=parseInt(d.i),f={};
