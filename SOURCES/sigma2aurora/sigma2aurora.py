@@ -6,6 +6,7 @@ import os
 import struct
 import shutil
 import re
+import sys
 
 try:
     to_unicode = unicode
@@ -115,7 +116,7 @@ txbuffer_path = os.path.join(projectdir, "TxBuffer_IC_1.dat")
 print("Reading " + txbuffer_path)
 if not os.path.exists(txbuffer_path):
     print("Could not find file TxBuffer_IC_1.dat in project directory")
-    exit()
+    sys.exit(1)
 txbuffer = bytearray()
 with open(txbuffer_path) as fp:
     line = fp.readline()
@@ -132,7 +133,7 @@ numbytes_path = os.path.join(projectdir, "NumBytes_IC_1.dat")
 print("Reading " + numbytes_path)
 if not os.path.exists(numbytes_path):
     print("Could not find file NumBytes_IC_1.dat in project directory")
-    exit()
+    sys.exit(1)
 numbytes = []
 with open(numbytes_path) as fp:
     line = fp.readline()
