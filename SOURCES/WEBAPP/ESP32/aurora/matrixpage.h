@@ -395,12 +395,12 @@ function tally(votes,k){
   var counts=[],i;
   for(i=0;i<k;i++)counts[i]=0;
   votes.forEach(function(v){counts[v]++;});
-  return {n:votes.length,counts:counts,pct:counts.map(function(c){return votes.length?100*c/votes.length:0;})};
+  return {counts:counts,pct:counts.map(function(c){return votes.length?100*c/votes.length:0;})};
 }
+function sum(a){return a.reduce(function(s,v){return s+v;},0);}  // the Votes in counts
 // p = sum of the probabilities of all outcomes no more likely than the observed one (k<=4, N<=50: cheap).
 function exactP(counts){
-  var k=counts.length,n=0,lf=[0],i,p=0,obs,c=[];
-  counts.forEach(function(v){n+=v;});
+  var k=counts.length,n=sum(counts),lf=[0],i,p=0,obs,c=[];
   for(i=1;i<=n;i++)lf[i]=lf[i-1]+Math.log(i);
   var lp=function(c){return lf[n]-c.reduce(function(s,v){return s+lf[v];},0)-n*Math.log(k);};
   obs=lp(counts);
@@ -412,8 +412,7 @@ function exactP(counts){
 }
 // winner: index of the single leader, -1 on a tie for first; p: null below 3 Votes; sig: a winner with p < 0.05.
 function verdict(counts){
-  var n=0,top=Math.max.apply(null,counts),lead=counts.filter(function(c){return c==top;}).length,p;
-  counts.forEach(function(v){n+=v;});
+  var n=sum(counts),top=Math.max.apply(null,counts),lead=counts.filter(function(c){return c==top;}).length,p;
   var w=n&&lead==1?counts.indexOf(top):-1;
   p=n<3?null:exactP(counts);
   return {winner:w,p:p,sig:w>=0&&p!==null&&p<0.05};

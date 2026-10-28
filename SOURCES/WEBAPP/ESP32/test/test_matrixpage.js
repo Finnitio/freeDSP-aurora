@@ -808,9 +808,9 @@ function stats() {
 
   // Votes are the indices of the chosen Presets; a Preset nobody chose still gets its row.
   assert.deepStrictEqual(JSON.parse(JSON.stringify(context.tally([2, 0, 2, 2], 3))),
-    { n: 4, counts: [1, 0, 3], pct: [25, 0, 75] });
+    { counts: [1, 0, 3], pct: [25, 0, 75] });
   assert.deepStrictEqual(JSON.parse(JSON.stringify(context.tally([], 2))),
-    { n: 0, counts: [0, 0], pct: [0, 0] }, "no Votes: zero shares, not NaN");
+    { counts: [0, 0], pct: [0, 0] }, "no Votes: zero shares, not NaN");
 
   // verdict: winner = index of the single leader, -1 on a tie for first; sig only for a winner with p < 0.05.
   const verdict = (counts, winner, p, sig, msg) => {
