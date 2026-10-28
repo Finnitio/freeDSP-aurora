@@ -984,6 +984,12 @@ static void slotRulesAreTheSameForEditsAndPresets()
     assert(loaded.loadPreset(preset) == "bad slot");
   }
 
+  // Keep the live editor's established first-error behavior when more than one
+  // final invariant is invalid in the same patch.
+  FakePort invalidPort;
+  MatrixModel invalidModel(invalidPort, 2, 8, 8);
+  assert(addSlot(invalidModel, "\"type\":\"hp\",\"design\":\"lr\",\"order\":6,\"freq\":19") == "freq out of range");
+
   // Non-crossover design/order are accepted for compatibility, then normalized
   // through both paths so a later type change cannot revive hidden settings.
   FakePort editPort;

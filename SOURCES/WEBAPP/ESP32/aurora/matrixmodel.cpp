@@ -156,12 +156,7 @@ const char* MatrixModel::normalizeSlot( Slot& s )
 {
   if( s.type < SLOT_PEQ || s.type > SLOT_PHASE )
     return "type";
-  if( s.type == SLOT_HP || s.type == SLOT_LP )
-  {
-    if( !orderValid( s.lr, s.order ) )
-      return "order";
-  }
-  else
+  if( s.type != SLOT_HP && s.type != SLOT_LP )
   {
     s.lr = false;
     s.order = 1;
@@ -174,6 +169,8 @@ const char* MatrixModel::normalizeSlot( Slot& s )
     return "gain";
   if( !( s.slope >= kSlopeMin && s.slope <= kSlopeMax ) )
     return "slope";
+  if( ( s.type == SLOT_HP || s.type == SLOT_LP ) && !orderValid( s.lr, s.order ) )
+    return "order";
   return NULL;
 }
 
