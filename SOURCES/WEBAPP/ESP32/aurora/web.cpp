@@ -32,7 +32,7 @@
 extern Display myDisplay;
 #endif
 extern void updateUI(void);
-extern void applyPresetSwitch( uint8_t preset );
+extern void applyPresetSwitch( uint8_t preset, bool redraw );
 extern volatile bool apOpenFallback;
 extern volatile bool apUp;
 extern const char* apPasswordError;
@@ -1250,9 +1250,7 @@ void handlePostPresetJson( JsonObject root )
 
   Serial.println( root["pre"].as<String>() );
 
-  applyPresetSwitch( root["pre"].as<uint8_t>() );
-
-  updateUI();
+  applyPresetSwitch( root["pre"].as<uint8_t>(), true );  // checked by validatePostPresetJson()
 
   matrixEndPresetSwitch();
 }

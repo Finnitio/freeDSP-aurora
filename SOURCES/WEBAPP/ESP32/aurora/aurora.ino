@@ -706,28 +706,34 @@ void setup()
 /*! The one Preset switch of web (POST /preset) and rotary encoder. Runs on the
  *  I2C worker, inside matrixBeginPresetSwitch()/matrixEndPresetSwitch().
  *  Matrix Plugin: the difference inside one shared gain ramp, no DAC mute and no
- *  legacy parameter upload (ADR 0003). Other Plugins: full upload under the DAC mute. */
-void applyPresetSwitch( uint8_t preset ) {
+ *  legacy parameter upload (ADR 0003). Other Plugins: full upload under the DAC mute.
+ *  redraw: update the display here (web); the encoder redraws later from loop(). Other
+ *  Plugins redraw before the DAC unmute, as they always did. */
+void applyPresetSwitch( uint8_t preset, bool redraw ) {
   currentPreset = preset;
   if( isMatrixPlugin() )
   {
     matrixLoadPreset();  // includes the Add-on B config, written only if it differs
+    if( redraw )
+      updateUI();
     return;
   }
   softMuteDAC();
   initUserParams();
   uploadUserParams();
   updateAddOn();
+  if( redraw )
+    updateUI();
   softUnmuteDAC();
 }
 
 void next_preset(void) {
-  applyPresetSwitch( currentPreset + 1 >= MAX_NUM_PRESETS ? 0 : currentPreset + 1 );
+  applyPresetSwitch( currentPreset + 1 >= MAX_NUM_PRESETS ? 0 : currentPreset + 1, false );
   matrixEndPresetSwitch();
 }
 
 void prev_preset(void) {
-  applyPresetSwitch( currentPreset == 0 ? MAX_NUM_PRESETS - 1 : currentPreset - 1 );
+  applyPresetSwitch( currentPreset == 0 ? MAX_NUM_PRESETS - 1 : currentPreset - 1, false );
   matrixEndPresetSwitch();
 }
 
