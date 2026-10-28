@@ -26,6 +26,7 @@
 #include "apconfig.h"
 #include "matrix.h"
 #include "matrixpage.h"
+#include "mastervolume.h"
 
 #if HAVE_DISPLAY
 extern Display myDisplay;
@@ -1223,7 +1224,8 @@ void handlePostMasterVolumeJson( JsonObject root )
 
 
 
-  masterVolume.val = root["vol"].as<String>().toFloat();
+  // checked by validatePostMasterVolumeJson(): a refused value leaves the volume as it is
+  parseVolume( root["vol"].as<String>().c_str(), masterVolume.val );
 
   setMasterVolume();
   matrixMasterVolumeChanged();
@@ -1545,6 +1547,20 @@ void handlePostWifiConfigJson( JsonObject root )
 /*! Checks the WiFi (STA) credentials before they are queued. Returns a message
  *  for the UI or NULL.
  */
+/*! POST /mvol: a number in MASTER_VOLUME_MIN_DB..MASTER_VOLUME_MAX_DB (as text or number). */
+static const char* validatePostMasterVolumeJson( JsonObject root )
+{
+  float db;
+  return parseVolume( root["vol"].as<String>().c_str(), db ) ? NULL : "vol must be a number from -120 to 0 dB";
+}
+
+/*! POST /preset: "pre" is a Preset index 0..MAX_NUM_PRESETS-1. */
+static const char* validatePostPresetJson( JsonObject root )
+{
+  JsonVariant pre = root["pre"];
+  return pre.is<int>() && pre.as<int>() >= 0 && pre.as<int>() < MAX_NUM_PRESETS ? NULL : "pre must be a Preset index 0-3";
+}
+
 static const char* validatePostWifiConfigJson( JsonObject root )
 {
   return staConfigError( root["ssid"].as<String>().c_str(), root["pwd"].as<String>().c_str() );
@@ -2077,13 +2093,19 @@ void setupWebserver (void)
   });
   server.on( "/mvol", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
   {
-    postJson( request, data, len, index, total, handlePostMasterVolumeJson );
+    postJson( request, data, len, index, total, handlePostMasterVolumeJson, 1024, validatePostMasterVolumeJson );
   });
   server.on( "/preset", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
   {
     std::shared_ptr<DynamicJsonDocument> doc = readJsonBody( request, data, len, index, total, 1024 );
     if( !doc )
       return;
+    const char* bad = validatePostPresetJson( doc->as<JsonObject>() );
+    if( bad )
+    {
+      request->send( 400, "text/plain", bad );
+      return;
+    }
     if( !matrixBeginPresetSwitch() )
     {
       request->send( 409, "text/plain", "preset switch in progress" );

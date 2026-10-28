@@ -83,8 +83,26 @@ static void millisWrapAroundStillStores()
   assert( saver.saveDue( 0xFFFFFF00u + 2000u ) );
 }
 
+// POST /mvol: a value outside -120..0 dB, or no number, is refused, never stored.
+static void postedVolumeMustBeInRange()
+{
+  float db = 1.0f;
+  assert( parseVolume( "-18.5", db ) && db == -18.5f );
+  assert( parseVolume( "0", db ) && db == 0.0f );
+  assert( parseVolume( "-120", db ) && db == -120.0f );
+  db = -7.0f;
+  assert( !parseVolume( "3", db ) );
+  assert( !parseVolume( "-120.5", db ) );
+  assert( !parseVolume( "loud", db ) );
+  assert( !parseVolume( "", db ) );
+  assert( !parseVolume( nullptr, db ) );
+  assert( !parseVolume( "nan", db ) );
+  assert( db == -7.0f );  // untouched when refused
+}
+
 int main()
 {
+  postedVolumeMustBeInRange();
   changeIsStoredAfterTheDebounce();
   eachChangeRestartsTheDebounce();
   returningToTheStoredValueStoresNothing();

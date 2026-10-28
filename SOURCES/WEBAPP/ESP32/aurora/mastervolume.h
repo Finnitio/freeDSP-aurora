@@ -16,22 +16,33 @@
 #define MASTER_VOLUME_MAX_DB 0.0f
 
 //------------------------------------------------------------------------------
+/*! A volume as text (stored, or posted to /mvol): true and db set if it is a
+ *  number in MASTER_VOLUME_MIN_DB..MASTER_VOLUME_MAX_DB, else false and db untouched.
+ */
+inline bool parseVolume( const char* text, float& db )
+{
+  if( !text )
+    return false;
+  char* end;
+  const float v = strtof( text, &end );
+  if( end == text )
+    return false;
+  while( isspace( (unsigned char)*end ) )
+    end++;
+  // the range setMasterVolume() accepts; the comparison is false for NaN
+  if( *end != '\0' || !( v >= MASTER_VOLUME_MIN_DB && v <= MASTER_VOLUME_MAX_DB ) )
+    return false;
+  db = v;
+  return true;
+}
+
 /*! The volume stored as text; the safe default if there is none or it is not a
  *  valid volume.
  */
 inline float parseStoredVolume( const char* text )
 {
-  if( !text )
-    return MASTER_VOLUME_DEFAULT_DB;
-  char* end;
-  float db = strtof( text, &end );
-  if( end == text )
-    return MASTER_VOLUME_DEFAULT_DB;
-  while( isspace( (unsigned char)*end ) )
-    end++;
-  // the range setMasterVolume() accepts; the comparison is false for NaN
-  if( *end != '\0' || !( db >= MASTER_VOLUME_MIN_DB && db <= MASTER_VOLUME_MAX_DB ) )
-    return MASTER_VOLUME_DEFAULT_DB;
+  float db = MASTER_VOLUME_DEFAULT_DB;
+  parseVolume( text, db );
   return db;
 }
 
