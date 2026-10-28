@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <SPIFFS.h>
-#include <Wire.h>
 #include <vector>
 
 #include "matrix.h"
@@ -93,16 +92,7 @@ void execOps( const std::vector<Op>& ops )
       setSpdifOutputRouting();
     }
     else if( op.type == OP_ADDON )
-    {
-      currentAddOnCfg[0] = op.addOn.addr;
-      currentAddOnCfg[1] = op.addOn.reg;
-      currentAddOnCfg[2] = op.addOn.data;
-      I2cLock lock;
-      Wire.beginTransmission( op.addOn.addr >> 1 );
-      Wire.write( op.addOn.reg );
-      Wire.write( op.addOn.data );
-      Wire.endTransmission( true );
-    }
+      writeAddOnBConfig( op.addOn.addr, op.addOn.reg, op.addOn.data );
     else if( op.type == OP_BIQUAD )
     {
       const uint16_t* base = ( op.kind == MATRIX_BUS ? matrixMeta.busbiquad : matrixMeta.outbiquad );
@@ -387,16 +377,8 @@ MatrixEditResult matrixSetAddOn( uint8_t addr, uint8_t reg, uint8_t data )
   i2c.add( addr );
   i2c.add( reg );
   i2c.add( data );
-  std::vector<Op> ops;
-  MatrixEditResult result;
-  {
-    ModelLock lock;
-    port.ops.clear();
-    result = model->apply( patch, millis() );
-    ops.swap( port.ops );
-  }
-  execOps( ops );  // already on the I2C worker
-  return result;
+  std::string state;
+  return matrixApply( patch, state );
 }
 
 std::string matrixState( void )

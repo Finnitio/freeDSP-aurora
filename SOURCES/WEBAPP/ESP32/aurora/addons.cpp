@@ -43,6 +43,18 @@ void setupAddOnB( void )
   Serial.println( "[OK]" );
 }
 
+void writeAddOnBConfig( uint8_t addr, uint8_t reg, uint8_t data )
+{
+  currentAddOnCfg[0] = addr;
+  currentAddOnCfg[1] = reg;
+  currentAddOnCfg[2] = data;
+  I2cLock lock;
+  Wire.beginTransmission( addr >> 1 );
+  Wire.write( reg );
+  Wire.write( data );
+  Wire.endTransmission( true );
+}
+
 //==============================================================================
 /*! Setup AddOn A
  *

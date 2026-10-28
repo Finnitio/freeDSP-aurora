@@ -1477,29 +1477,18 @@ void handlePostStore( JsonObject root )
 /*! Handles the POST request for storing addon configuration
  *
  */
+/*! Byte n of the Add-on config in a POST /addoncfg body (hex text). */
+static uint8_t addOnByte( JsonObject root, int n )
+{
+  return (uint8_t)strtoul( root["i2c"][n].as<String>().c_str(), NULL, 16 );
+}
+
+/*! Non-matrix Plugins (the matrix Plugin answers POST /addoncfg in setupWebserver()). */
 void handlePostAddonConfigJson( JsonObject root )
 {
   #if DEBUG_PRINT
   Serial.println(F("POST /addoncfg"));
   #endif
-
-  if( isMatrixPlugin() )
-  {
-    // Matrix Plugin: part of the active Preset, autosaved, no DAC mute (ADR 0003).
-    // Other Add-ons have nothing per Preset.
-    if( Settings.addonid == ADDON_B )
-    {
-      MatrixEditResult result = matrixSetAddOn( (uint8_t)strtoul( root["i2c"][0].as<String>().c_str(), NULL, 16 ),
-                                                (uint8_t)strtoul( root["i2c"][1].as<String>().c_str(), NULL, 16 ),
-                                                (uint8_t)strtoul( root["i2c"][2].as<String>().c_str(), NULL, 16 ) );
-      if( !result.ok() )
-      {
-        Serial.print( F("[ERROR] POST /addoncfg: ") );
-        Serial.println( result.reason.c_str() );
-      }
-    }
-    return;
-  }
 
   softMuteDAC();
 
@@ -1509,15 +1498,7 @@ void handlePostAddonConfigJson( JsonObject root )
     for( int ii = 0; ii < len; ii++ )
       Serial.println( root["i2c"][ii].as<String>() );
 
-    currentAddOnCfg[0] = (uint8_t)strtoul( root["i2c"][0].as<String>().c_str(), NULL, 16 );
-    currentAddOnCfg[1] = (uint8_t)strtoul( root["i2c"][1].as<String>().c_str(), NULL, 16 );
-    currentAddOnCfg[2] = (uint8_t)strtoul( root["i2c"][2].as<String>().c_str(), NULL, 16 );
-
-    I2cLock lock;
-    Wire.beginTransmission( currentAddOnCfg[0]>>1 ); //ADDONB_SPDIFMUX_ADDR
-    Wire.write( currentAddOnCfg[1] ); // regaddr
-    Wire.write( currentAddOnCfg[2] ); // data
-    Wire.endTransmission( true );
+    writeAddOnBConfig( addOnByte( root, 0 ), addOnByte( root, 1 ), addOnByte( root, 2 ) );
   }
 
 
@@ -2130,6 +2111,23 @@ void setupWebserver (void)
   });
   server.on( "/addoncfg", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
   {
+    if( isMatrixPlugin() )
+    {
+      // Matrix Plugin: part of the active Preset, a live edit answered here, so an edit
+      // during a Preset switch gets 409; autosaved, no DAC mute (ADR 0003).
+      std::shared_ptr<DynamicJsonDocument> doc = readJsonBody( request, data, len, index, total, 1024 );
+      if( !doc )
+        return;
+      if( Settings.addonid != ADDON_B )  // other Add-ons have nothing per Preset
+      {
+        request->send( 200, "text/plain", "" );
+        return;
+      }
+      JsonObject root = doc->as<JsonObject>();
+      const MatrixEditResult edit = matrixSetAddOn( addOnByte( root, 0 ), addOnByte( root, 1 ), addOnByte( root, 2 ) );
+      request->send( matrixEditHttpStatus( edit.status ), "text/plain", edit.ok() ? "" : edit.reason.c_str() );
+      return;
+    }
     postJson( request, data, len, index, total, handlePostAddonConfigJson );
   });
   server.on( "/wifi", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
