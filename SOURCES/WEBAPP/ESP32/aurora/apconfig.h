@@ -32,6 +32,23 @@ static inline const char* apConfigError( const char* pwd, const char* name, int 
 }
 
 //------------------------------------------------------------------------------
+/*! Returns NULL if the credentials for joining a WiFi (STA) are valid, else a
+ *  message for the UI. An empty SSID forgets the network (the password is
+ *  then ignored), an empty password joins an open network.
+ */
+static inline const char* staConfigError( const char* ssid, const char* pwd )
+{
+  const size_t ssidLen = strlen( ssid );
+  const size_t pwdLen = strlen( pwd );
+
+  if( ssidLen > 32 )
+    return "WiFi name can have at most 32 characters";
+  if( ssidLen > 0 && ( ( pwdLen > 0 && pwdLen < 8 ) || pwdLen > 63 ) )
+    return "WiFi password needs 8 to 63 characters, or none for an open network";
+  return NULL;
+}
+
+//------------------------------------------------------------------------------
 /*! How the AP is started from the stored settings, which may be invalid
  *  (older file, edited by hand). Name and channel fall back to their
  *  defaults. An invalid password falls back to an open AP so the web UI
