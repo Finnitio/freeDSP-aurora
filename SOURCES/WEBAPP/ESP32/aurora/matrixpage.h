@@ -439,7 +439,7 @@ var ab=null;
 function abStart(){
   if(abSel.length<2||switching)return;
   var n=Math.max(3,Math.min(50,parseInt(abEl("trounds").value)||10));
-  ab={pre:abSel.slice().sort(),n:n,votes:[],order:[],cur:-1,back:activePreset};
+  ab={pre:abSel.slice().sort(function(a,b){return a-b;}),n:n,votes:[],order:[],cur:-1,back:activePreset};
   abShow("trun");abEl("tround").textContent="Waiting for the DSP...";abEl("tlabels").innerHTML="";abEl("tvote").disabled=true;
   var t=ab;
   t.sw=waitIdle().then(function(){t.back=activePreset;if(!t.end)abRound();});  // the DSP is idle, the active Preset settled
