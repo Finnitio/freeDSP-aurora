@@ -36,7 +36,7 @@ convert() {
   if [ -n "$2" ]; then
     gui=(--gui "$2")
   fi
-  if ! python sigma2aurora.py ../SIGMASTUDIO/$1/$1.xml $1 --version $PLUGIN_VERSION "${gui[@]}" --outputdir plugins; then
+  if ! python sigma2aurora.py "../SIGMASTUDIO/$1/$1.xml" "$1" --version "$PLUGIN_VERSION" "${gui[@]}" --outputdir plugins; then
     echo "Converting plugin $1 failed" >&2
     exit 1
   fi

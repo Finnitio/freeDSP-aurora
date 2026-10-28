@@ -333,14 +333,14 @@ static void presetSwitchRejectsAnOverlappingEditAndKeepsPresetAssociation()
   assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":6}") == "preset switch in progress");
   assert(port.w.empty());
 
-  // Loading the selected preset emits its complete DSP state. The refused edit
+  // Loading the selected Preset emits its complete DSP state. The refused edit
   // cannot append a stale write behind that state.
   assert(m.loadPreset(presetB).empty());
   assert(stateOf(m)["outs"][0]["gain"] == -12);
   assert(port.w.size() == 4 + 32 + 1);
   m.endPresetSwitch();
 
-  // Edits resume against preset B and are persisted with B, while the snapshot
+  // Edits resume against Preset B and are persisted with B, while the snapshot
   // saved for A retains the accepted pre-switch edit.
   port.w.clear();
   assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":-10}", 4000).empty());
@@ -1600,7 +1600,7 @@ static void editResultsDistinguishSuccessBadRequestAndConflict()
   r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":99}");
   assert(r.status == MATRIX_EDIT_BAD_REQUEST && !r.reason.empty());
 
-  // An edit made against another preset is a conflict, whatever else it carries.
+  // An edit made against another Preset is a conflict, whatever else it carries.
   port.w.clear();
   r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":-6,\"preset\":1}");
   assert(r.status == MATRIX_EDIT_CONFLICT && r.reason == "preset changed; refresh the matrix");
@@ -1608,7 +1608,7 @@ static void editResultsDistinguishSuccessBadRequestAndConflict()
   assert(r.status == MATRIX_EDIT_CONFLICT && r.reason == "preset changed; refresh the matrix");
   assert(port.w.empty());
 
-  // During a preset switch every edit is a conflict, and a second switch cannot start.
+  // During a Preset switch every edit is a conflict, and a second switch cannot start.
   assert(m.beginPresetSwitch());
   assert(!m.beginPresetSwitch());
   r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":99}");
@@ -1617,6 +1617,15 @@ static void editResultsDistinguishSuccessBadRequestAndConflict()
   m.endPresetSwitch();
   assert(edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":-6}").status == MATRIX_EDIT_OK);
   assert(m.beginPresetSwitch());
+}
+
+// The /matrix reply: a full worker queue is "try again" (503, as for /preset), not a bad patch.
+static void editStatusesMapToDistinctHttpReplies()
+{
+  assert(matrixEditHttpStatus(MATRIX_EDIT_OK) == 200);
+  assert(matrixEditHttpStatus(MATRIX_EDIT_BAD_REQUEST) == 400);
+  assert(matrixEditHttpStatus(MATRIX_EDIT_CONFLICT) == 409);
+  assert(matrixEditHttpStatus(MATRIX_EDIT_BUSY) == 503);
 }
 
 static void stateCarriesTheActivePreset()
@@ -1632,6 +1641,7 @@ static void stateCarriesTheActivePreset()
 int main()
 {
   editResultsDistinguishSuccessBadRequestAndConflict();
+  editStatusesMapToDistinctHttpReplies();
   stateCarriesTheActivePreset();
   linkMembershipHasSeparateBusAndOutputScopes();
   linkedAspectsPropagateAndJoiningCopiesAbsoluteValues();

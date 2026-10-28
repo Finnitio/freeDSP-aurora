@@ -44,7 +44,7 @@ static void requestIsDrawnOnceWhenBusIsFree()
   assert( display.drawn[0] == PendingRedraw::UI );
 }
 
-// The worker holds the bus for a whole preset load or FIR upload: the redraw
+// The worker holds the bus for a whole Preset load or FIR upload: the redraw
 // waits and is drawn on the first serve() after the job, never lost.
 static void redrawWhileBusIsBusyIsDrawnLater()
 {

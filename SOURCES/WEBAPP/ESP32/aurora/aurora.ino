@@ -187,6 +187,12 @@ void uploadDspFirmware( void )
     Serial.println(F("\n[ERROR] Failed to open file dsp.fw"));
 }
 
+//==============================================================================
+/*! The redraw loop() owes. Drawn only when the bus is free, so loop() never
+ *  waits for a Preset load or FIR upload on the worker.
+ */
+static PendingRedraw pendingRedraw;
+
 #if HAVE_DISPLAY
 static String uiStatusLine( void )
 {
@@ -197,24 +203,25 @@ static String uiStatusLine( void )
   return String( line );
 }
 
+// The edit modes the main UI shows (volume, Preset, virtual input).
+static bool editModeHasUI( void )
+{
+  return (editMode == 0) || (editMode == 1) || (editMode == 2);
+}
+
 //==============================================================================
 /*! Updates the user interface on the display. Waits for the bus, so it is for
- *  setup() and worker jobs; loop() requests a redraw from pendingRedraw instead.
+ *  setup() and the I2C worker's jobs (including the web handlers' jobs posted
+ *  there); loop() requests a redraw from pendingRedraw instead.
  */
 void updateUI( void )
 {
   if(haveDisplay)
   {
-    if( (editMode == 0) || (editMode == 1) || (editMode == 2) )
+    if( editModeHasUI() )
       myDisplay.drawUI(currentPlugInName.c_str(), uiStatusLine().c_str(), currentPreset, masterVolume.val, editMode);
   }
 }
-
-//==============================================================================
-/*! The redraw loop() owes. Drawn only when the bus is free, so loop() never
- *  waits for a preset load or FIR upload on the worker.
- */
-static PendingRedraw pendingRedraw;
 
 static bool tryDrawScreen( PendingRedraw::Screen screen )
 {
@@ -222,10 +229,14 @@ static bool tryDrawScreen( PendingRedraw::Screen screen )
     return true;
   if( screen == PendingRedraw::SWITCHING_PRESET )
     return myDisplay.tryDrawSwitchingPreset();
-  if( (editMode == 0) || (editMode == 1) || (editMode == 2) )
+  if( editModeHasUI() )
     return myDisplay.tryDrawUI(currentPlugInName.c_str(), uiStatusLine().c_str(), currentPreset, masterVolume.val, editMode);
   return true;
 }
+#else
+// Without a display there is nothing to draw; loop() and the worker jobs stay the same.
+void updateUI( void ) {}
+static bool tryDrawScreen( PendingRedraw::Screen ) { return true; }
 #endif
 
 //==============================================================================
@@ -860,7 +871,7 @@ void loop()
   #endif
 
   // Drawn only once the bus is free, so the input above keeps being read
-  // while the worker runs a preset load or FIR upload.
+  // while the worker runs a Preset load or FIR upload.
   pendingRedraw.serve( tryDrawScreen );
 
 }

@@ -314,6 +314,17 @@ async function commitTests() {
   assert.strictEqual(f2.value, "1200");
   assert.strictEqual(els.msg.textContent, "freq must be a number");
 
+  // A full worker queue (503) is shown like a rejected value: the field reverts.
+  reply = () => ({ ok: false, status: 503, text: "busy" });
+  const f3 = input("s0freq");
+  type(f3, "800");
+  key(f3, "Enter");
+  assert.strictEqual(posts.pop().body.slot.freq, 800);
+  await flush();
+  assert.strictEqual(f3.value, "1200", "a busy reply reverts the field");
+  assert.strictEqual(els.msg.textContent, "busy");
+  assert.strictEqual(posts.length, 0, "a busy reply does not reload the state");
+
   // Channel gain and delay on the filter page.
   reply = accept;
   focus(null);
@@ -338,7 +349,7 @@ async function commitTests() {
   assert.strictEqual(posts.pop().url, "/mvol");
 }
 
-// ---- Preset switch: from the click until the new preset's state has loaded, no edit is sent.
+// ---- Preset switch: from the click until the new Preset's state has loaded, no edit is sent.
 async function switchTests() {
   const sent = [];  // edits that reached the network
   let timers = [], held = null, state = sample(), vol = -60;
@@ -368,7 +379,7 @@ async function switchTests() {
   context.activePreset = 2;
   context.draw();
 
-  // Matrix page: the master volume slider is being dragged when preset B is clicked.
+  // Matrix page: the master volume slider is being dragged when Preset B is clicked.
   context.sendVol("-20");
   context.sendVol("-19");  // waits for the 100 ms throttle
   assert.deepStrictEqual(sent.map((x) => x.body.vol), [-20]);
@@ -397,7 +408,7 @@ async function switchTests() {
   assert.strictEqual(els.vol.value, -30, "the slider shows the new preset's volume");
   assert.strictEqual(input("gout0").value, "-10", "the field shows the new preset's gain");
 
-  // After the reload, edits resume and are tagged with the new preset.
+  // After the reload, edits resume and are tagged with the new Preset.
   context.sendVol("-25");
   const g2 = input("gout0");
   focus(g2);

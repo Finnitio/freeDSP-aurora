@@ -19,9 +19,9 @@ void matrixInit( void );
  *  the I2C worker (or in setup()); the DSP writes happen right away. */
 void matrixLoadPreset( void );
 
-/*! Closes/reopens the live-edit gate around a preset switch. Begin must happen
+/*! Closes/reopens the live-edit gate around a Preset switch. Begin must happen
  *  before the switch is queued, so later web edits are rejected instead of
- *  landing behind the selected preset's writes. */
+ *  landing behind the selected Preset's writes. */
 bool matrixBeginPresetSwitch( void );
 void matrixEndPresetSwitch( void );
 

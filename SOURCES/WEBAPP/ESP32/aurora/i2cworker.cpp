@@ -7,7 +7,7 @@ static SemaphoreHandle_t i2cMutex = NULL;
 static QueueHandle_t i2cQueue = NULL;
 
 static const int I2C_QUEUE_LEN = 32;
-// Jobs do SPIFFS and JSON work too (preset load parses the matrix preset), hence
+// Jobs do SPIFFS and JSON work too (Preset load parses the matrix Plugin's Preset), hence
 // the big stack. The high-water mark logged below tells whether it is big enough.
 static const uint32_t I2C_WORKER_STACK = 10240;
 static std::atomic<int> i2cPending( 0 );  // queued + running jobs
@@ -28,13 +28,13 @@ static void i2cWorkerTask( void* pvParameters )
       i2cPending--;
 
       // Logged whenever a job used more stack than every job before it, so the
-      // last line after a preset load or FIR upload is the worst case so far.
-      const UBaseType_t free = uxTaskGetStackHighWaterMark( NULL );  // bytes on ESP32
-      if( free < lowestFree )
+      // last line after a Preset load or FIR upload is the worst case so far.
+      const UBaseType_t unusedStack = uxTaskGetStackHighWaterMark( NULL );  // bytes on ESP32
+      if( unusedStack < lowestFree )
       {
-        lowestFree = free;
+        lowestFree = unusedStack;
         Serial.printf( "[I2C] worker stack high-water: %u of %u bytes never used\n",
-                       (unsigned)free, (unsigned)I2C_WORKER_STACK );
+                       (unsigned)unusedStack, (unsigned)I2C_WORKER_STACK );
       }
     }
   }

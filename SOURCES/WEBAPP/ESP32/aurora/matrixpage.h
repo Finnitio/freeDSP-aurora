@@ -104,7 +104,7 @@ function drawPresets(cur){
   document.getElementById("presets").innerHTML=h;
 }
 // From the click until the state has been reloaded no edit is sent: edits made meanwhile, and a
-// master volume value still waiting for the throttle, are dropped rather than sent to the new preset.
+// master volume value still waiting for the throttle, are dropped rather than sent to the new Preset.
 var switching=false;
 function preset(p){
   if(switching)return;
