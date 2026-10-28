@@ -445,12 +445,15 @@ void MatrixModel::saveUndo( void )
   undo_.lastChange = lastChange_;
 }
 
-void MatrixModel::loadDefaults( void )
+void MatrixModel::loadDefaults( MatrixRampSet* ramp )
 {
+  Snapshot before;
+  snapshot( before );
+  const uint32_t spdifBefore = spdif_;
   reset();
   undo_.valid = false;
   dirty_ = false;
-  applyAll();
+  writeDiff( before, spdifBefore, ramp );
 }
 
 double MatrixModel::linear( const Channel& c ) const
@@ -511,6 +514,45 @@ void MatrixModel::writeChanges( const Snapshot& before )
     const int idx = n < nbus_ ? n : n - nbus_;
     if( ramp[n] ) port_.writeGain( kind, idx, linear( kind == MATRIX_BUS ? bus_[idx] : out_[idx] ) );
   }
+}
+
+/*! Preset load: writes every block that differs from the snapshot, without a ramp.
+ *  Channels with a filter, Source or route difference form the ramp set; their gain
+ *  write (if it differs) comes last, so a ramp around these writes ends with it. */
+void MatrixModel::writeDiff( const Snapshot& before, uint32_t spdifBefore, MatrixRampSet* ramp )
+{
+  MatrixRampSet set;
+  for( int n = 0; n < nbus_ + nout_; n++ )
+  {
+    const MatrixChannelKind kind = n < nbus_ ? MATRIX_BUS : MATRIX_OUT;
+    const int idx = n < nbus_ ? n : n - nbus_;
+    const Channel& was = kind == MATRIX_BUS ? before.bus[idx] : before.out[idx];
+    const Channel& now = kind == MATRIX_BUS ? bus_[idx] : out_[idx];
+    const bool marked = now.sel != was.sel || needsRamp( was, now );
+    if( marked )
+      set.push_back( { kind, idx, linear( now ) } );
+    if( !marked && linear( now ) != linear( was ) ) port_.writeGain( kind, idx, linear( now ) );
+    if( now.sel != was.sel )
+    {
+      if( kind == MATRIX_BUS ) port_.writeSource( idx, (uint32_t)now.sel ); else port_.writeRoute( idx, now.sel );
+    }
+    if( kind == MATRIX_OUT )
+    {
+      if( now.polarity != was.polarity ) port_.writePolarity( idx, now.polarity );
+      if( ( now.delayBypass ? 0 : now.delay ) != ( was.delayBypass ? 0 : was.delay ) )
+        port_.writeDelay( idx, now.delayBypass ? 0 : now.delay );
+    }
+    writeStages( kind, idx, now, &was );
+  }
+  if( spdif_ != spdifBefore )
+    port_.writeSpdifOut( spdif_, spdif_ + 1 );
+  for( size_t i = 0; i < set.size(); i++ )
+  {
+    const Channel& was = set[i].kind == MATRIX_BUS ? before.bus[set[i].idx] : before.out[set[i].idx];
+    if( set[i].linear != linear( was ) ) port_.writeGain( set[i].kind, set[i].idx, set[i].linear );
+  }
+  if( ramp )
+    ramp->swap( set );
 }
 
 void MatrixModel::snapshot( Snapshot& s ) const
@@ -1121,7 +1163,7 @@ std::string MatrixModel::readChannel( JsonObject o, bool isBus, Channel& c ) con
   return "";
 }
 
-std::string MatrixModel::loadPreset( const std::string& json )
+std::string MatrixModel::loadPreset( const std::string& json, MatrixRampSet* ramp )
 {
   // a smaller document usually fits; the 4x one only when that ran out of memory
   DynamicJsonDocument docS( 2 * json.size() + 1024 );
@@ -1195,6 +1237,9 @@ std::string MatrixModel::loadPreset( const std::string& json )
     if( !err.empty() )
       return err;
   }
+  Snapshot before;
+  snapshot( before );
+  const uint32_t spdifBefore = spdif_;
   for( int b = 0; b < nbus_; b++ ) bus_[b] = nb[b];
   for( int o = 0; o < nout_; o++ ) out_[o] = no[o];
   busLink_ = busLink;
@@ -1202,7 +1247,7 @@ std::string MatrixModel::loadPreset( const std::string& json )
   spdif_ = spdif;
   undo_.valid = false;
   dirty_ = false;
-  applyAll();
+  writeDiff( before, spdifBefore, ramp );
   return "";
 }
 

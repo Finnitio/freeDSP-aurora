@@ -50,6 +50,17 @@ struct MatrixCoef
 #define MATRIX_SAVE_DELAY_MS 2000
 #define MATRIX_RAMP_MS 20  // gain slew to settle before a route/Source switch or a biquad write
 
+/*! A Channel whose filter, Source or route differs after a Preset load: it takes the
+ *  shared gain ramp (ramp down, wait MATRIX_RAMP_MS, the load's writes, ramp up).
+ *  linear is its gain after the load, i.e. the ramp-up value. */
+struct MatrixRamp
+{
+  MatrixChannelKind kind;
+  int idx;
+  double linear;
+};
+typedef std::vector<MatrixRamp> MatrixRampSet;
+
 /*! Why a live edit was rejected, or that it was accepted. */
 enum MatrixEditStatus
 {
@@ -128,17 +139,22 @@ public:
    *  H(z) = (b0+b1 z^-1+b2 z^-2) / (1-a1 z^-1-a2 z^-2). "" if there is no such Channel. */
   std::string coeffsJson( const char* ch, int idx ) const;
 
-  /*! Versioned preset JSON, and its inverse. load() returns "" or the reason
-   *  and, on success, writes everything to the DSP. */
+  /*! Versioned preset JSON, and its inverse. loadPreset() returns "" or the reason.
+   *  On success it writes only the blocks that differ from the current state (each
+   *  biquad, gain, delay, polarity, route, Source, SPDIF out), with no ramp; the gain
+   *  write of a Channel in the ramp set (if its gain differs) comes after all other
+   *  writes. ramp (optional) receives the ramp set: every Channel with a filter,
+   *  Source or route difference. On failure nothing is written and the model and
+   *  ramp are untouched. */
   std::string savePreset( void ) const;
-  std::string loadPreset( const std::string& json );
+  std::string loadPreset( const std::string& json, MatrixRampSet* ramp = NULL );
 
-  /*! Writes the whole state to the DSP. */
+  /*! Writes the whole state to the DSP: the Baseline after the DSP program is loaded. */
   void applyAll( void );
 
-  /*! Back to the Baseline, written to the DSP in full: after the DSP program is
-   *  loaded, and for a Preset slot without a (valid) file. */
-  void loadDefaults( void );
+  /*! Back to the Baseline, for a Preset slot without a (valid) file; writes the
+   *  difference like loadPreset(). */
+  void loadDefaults( MatrixRampSet* ramp = NULL );
 
   /*! True once, MATRIX_SAVE_DELAY_MS after the last change; markSaved() clears it. */
   bool saveDue( uint32_t nowMs ) const;
@@ -205,6 +221,7 @@ private:
   bool needsRamp( const Channel& before, const Channel& after ) const;
   void snapshot( Snapshot& s ) const;
   void writeChanges( const Snapshot& before );
+  void writeDiff( const Snapshot& before, uint32_t spdifBefore, MatrixRampSet* ramp );
   void putChannel( JsonArray arr, const Channel& c, const char* selKey, bool withLimits ) const;
   std::string readChannel( JsonObject o, bool isBus, Channel& c ) const;
 

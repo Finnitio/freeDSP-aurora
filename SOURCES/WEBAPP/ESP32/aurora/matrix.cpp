@@ -169,8 +169,9 @@ void matrixWriteBaseline( void )
   std::vector<Op> ops;
   {
     ModelLock lock;
-    port.ops.clear();
     model->loadDefaults();
+    port.ops.clear();
+    model->applyAll();  // the DSP program was just loaded: write everything, not the difference
     ops.swap( port.ops );
   }
   execOps( ops );
@@ -209,6 +210,12 @@ void matrixLoadPreset( void )
       keepStored = !json.empty();  // an existing file stays as it is; edits are not auto-saved
     }
     model->setPreset( currentPreset );
+    // The switch path still runs initUserParams()/uploadUserParams() first, which
+    // rewrite the Bus Source muxes and the SPDIF out, so the model's difference
+    // is not what is on the DSP: write everything until the shared-ramp switch
+    // path (ticket 03) drops that legacy upload and executes the difference.
+    port.ops.clear();
+    model->applyAll();
     ops.swap( port.ops );
   }
   if( !oldJson.empty() )

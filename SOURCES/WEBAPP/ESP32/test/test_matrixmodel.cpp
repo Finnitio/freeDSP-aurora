@@ -73,6 +73,18 @@ static DynamicJsonDocument stateOf(const MatrixModel& m)
 
 static bool near(double a, double b) { return std::fabs(a - b) < 1e-6; }
 
+static bool isPassthrough(const FakePort::Bq& q)
+{
+  return q.b[0] == 1.0f && q.b[1] == 0 && q.b[2] == 0 && q.a[1] == 0 && q.a[2] == 0;
+}
+
+static bool rampHas(const MatrixRampSet& r, MatrixChannelKind kind, int idx)
+{
+  for (size_t i = 0; i < r.size(); i++)
+    if (r[i].kind == kind && r[i].idx == idx) return true;
+  return false;
+}
+
 // The Baseline (GLOSSARY): no Slots, 0 dB, Buses unmuted on Analog 1 / Analog 2,
 // every Output muted and routed from Bus 1.
 static void assertBaseline(const MatrixModel& m)
@@ -228,7 +240,7 @@ static void namesAreStoredWithoutDspWrites()
   assert(std::string(st["outs"][4]["name"].as<const char*>()) == "Tweeter L");
 }
 
-static void presetRoundTripAndFullWriteSetOnLoad()
+static void presetRoundTripWritesOnlyTheDifference()
 {
   FakePort port;
   MatrixModel a(port, 2, 8);
@@ -239,16 +251,18 @@ static void presetRoundTripAndFullWriteSetOnLoad()
 
   FakePort port2;
   MatrixModel b(port2, 2, 8);
-  assert(b.loadPreset(saved).empty());
+  MatrixRampSet ramp;
+  assert(b.loadPreset(saved, &ramp).empty());
   assert(b.savePreset() == saved);  // unchanged
-  assert(port2.w.size() == 4 + 32 + 1);  // full write set
-  bool sawExp = false, sawRoute2 = false;
-  for (size_t i = 0; i < port2.w.size(); i++)
-  {
-    if (port2.w[i].type == 's' && port2.w[i].val == 131075) sawExp = true;
-    if (port2.w[i].type == 'r' && port2.w[i].idx == 5 && port2.w[i].val == 2) sawRoute2 = true;
-  }
-  assert(sawExp && sawRoute2);
+  // against the Baseline: Bus 1 Source, Bus 2 mute, Output 6 route; Output 6's gain
+  // comes last because its route changed (it ends the ramp of ticket 3)
+  assert(port2.w.size() == 4);
+  assert(port2.w[0].type == 's' && port2.w[0].idx == 0 && port2.w[0].val == 131075);
+  assert(port2.w[1].type == 'g' && port2.w[1].kind == MATRIX_BUS && port2.w[1].idx == 1 && port2.w[1].val == 0.0);
+  assert(port2.w[2].type == 'r' && port2.w[2].idx == 5 && port2.w[2].val == 2);
+  assert(port2.w[3].type == 'g' && port2.w[3].kind == MATRIX_OUT && port2.w[3].idx == 5
+         && near(port2.w[3].val, std::pow(10.0, -3.5 / 20)));
+  assert(ramp.size() == 2 && rampHas(ramp, MATRIX_BUS, 0) && rampHas(ramp, MATRIX_OUT, 5));
   DynamicJsonDocument st = stateOf(b);
   assert(std::string(st["outs"][5]["name"].as<const char*>()) == "Sub \"mono\"");
 }
@@ -265,7 +279,7 @@ static void badPresetIsRejectedAndKeepsState()
   assert(port.w.empty());
 }
 
-static void loadDefaultsResetsAndWritesEverything()
+static void loadDefaultsResetsAndWritesTheDifference()
 {
   FakePort port;
   const int budget = 4;
@@ -273,14 +287,14 @@ static void loadDefaultsResetsAndWritesEverything()
   std::string fresh = m.savePreset();
   for (int b = 0; b < 2; b++)
   {
-    char json[96];
-    snprintf(json, sizeof(json), "{\"ch\":\"bus\",\"idx\":%d,\"slot\":{\"op\":\"add\",\"type\":\"peq\"}}", b);
+    char json[128];
+    snprintf(json, sizeof(json), "{\"ch\":\"bus\",\"idx\":%d,\"slot\":{\"op\":\"add\",\"type\":\"peq\",\"gain\":-3}}", b);
     assert(patch(m, json).empty());
   }
   for (int o = 0; o < 8; o++)
   {
-    char json[96];
-    snprintf(json, sizeof(json), "{\"ch\":\"out\",\"idx\":%d,\"slot\":{\"op\":\"add\",\"type\":\"peq\"}}", o);
+    char json[128];
+    snprintf(json, sizeof(json), "{\"ch\":\"out\",\"idx\":%d,\"slot\":{\"op\":\"add\",\"type\":\"peq\",\"gain\":-3}}", o);
     assert(patch(m, json).empty());
   }
   patch(m, "{\"ch\":\"out\",\"idx\":0,\"mute\":false,\"name\":\"X\"}", 10);
@@ -288,37 +302,33 @@ static void loadDefaultsResetsAndWritesEverything()
   patch(m, "{\"ch\":\"bus\",\"idx\":0,\"source\":65538,\"gain\":-3}", 10);
   port.w.clear();
   port.bq.clear();
-  m.loadDefaults();
+  MatrixRampSet ramp;
+  m.loadDefaults(&ramp);
   assertBaseline(m);
 
   DynamicJsonDocument st = stateOf(m);
   for (int b = 0; b < 2; b++)
   {
-    assert(st["buses"][b]["slots"].size() == 0);
     assert(st["buses"][b]["used"] == 0);
     assert(st["buses"][b]["free"] == budget);
   }
   for (int o = 0; o < 8; o++)
   {
-    assert(st["outs"][o]["slots"].size() == 0);
     assert(st["outs"][o]["used"] == 0);
     assert(st["outs"][o]["free"] == budget);
-    assert(st["outs"][o]["mute"] == true);
   }
   assert(m.savePreset() == fresh);
-  assert(port.w.size() == 4 + 32 + 1);
-  int routes = 0;
-  for (size_t i = 0; i < port.w.size(); i++)
-    if (port.w[i].type == 'r')
-    {
-      assert(port.w[i].val == 0);  // every Output from Bus 1
-      routes++;
-    }
-  assert(routes == 8);
-  assert(port.bq.size() == 10 * budget);
+  // Bus 1 Source, Output 4 route, then the gains of ramp-marked Channels: Bus 1 back to 0 dB, Output 1 muted
+  assert(port.w.size() == 4);
+  assert(port.w[0].type == 's' && port.w[0].idx == 0 && port.w[0].val == 0);
+  assert(port.w[1].type == 'r' && port.w[1].idx == 3 && port.w[1].val == 0);
+  assert(port.w[2].type == 'g' && port.w[2].kind == MATRIX_BUS && port.w[2].idx == 0 && port.w[2].val == 1.0);
+  assert(port.w[3].type == 'g' && port.w[3].kind == MATRIX_OUT && port.w[3].idx == 0 && port.w[3].val == 0.0);
+  // each Channel's one PEQ biquad back to passthrough; every Channel had a filter difference
+  assert(port.bq.size() == 10);
   for (size_t i = 0; i < port.bq.size(); i++)
-    assert(port.bq[i].a[0] == 1 && port.bq[i].a[1] == 0 && port.bq[i].a[2] == 0
-           && port.bq[i].b[0] == 1 && port.bq[i].b[1] == 0 && port.bq[i].b[2] == 0);
+    assert(port.bq[i].stage == 0 && isPassthrough(port.bq[i]));
+  assert(ramp.size() == 10);
   assert(!m.dirty());
 }
 
@@ -358,11 +368,11 @@ static void presetSwitchRejectsAnOverlappingEditAndKeepsPresetAssociation()
   assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":6}") == "preset switch in progress");
   assert(port.w.empty());
 
-  // Loading the selected Preset emits its complete DSP state. The refused edit
-  // cannot append a stale write behind that state.
+  // Loading the selected Preset emits its difference, Output 1's gain. The refused
+  // edit cannot append a stale write behind it.
   assert(m.loadPreset(presetB).empty());
   assert(stateOf(m)["outs"][0]["gain"] == -12);
-  assert(port.w.size() == 4 + 32 + 1);
+  assert(port.w.size() == 1 && port.w[0].type == 'g' && near(port.w[0].val, std::pow(10.0, -12.0 / 20)));
   m.endPresetSwitch();
 
   // Edits resume against Preset B and are persisted with B, while the snapshot
@@ -396,10 +406,6 @@ static void undoRestoresTheLastAcceptedPatch()
 
 //==============================================================================
 // Filter row: PEQ Slots on the Channel's biquads
-static bool isPassthrough(const FakePort::Bq& q)
-{
-  return q.b[0] == 1.0f && q.b[1] == 0 && q.b[2] == 0 && q.a[1] == 0 && q.a[2] == 0;
-}
 
 static const char* kAddPeq = "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"add\",\"freq\":1000,\"q\":1,\"gain\":6}}";
 
@@ -559,13 +565,18 @@ static void slotsRoundTripThroughPresetsAndReemit()
   FakePort port;
   MatrixModel a(port, 2, 8, 4);
   patch(a, kAddPeq);
+  const std::string active = a.savePreset();
   patch(a, "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"set\",\"i\":0,\"bypass\":true}}");
   std::string saved = a.savePreset();
   FakePort port2;
   MatrixModel b(port2, 2, 8, 4);
+  assert(b.loadPreset(active).empty());
+  assert(port2.bq.size() == 1 && port2.bq[0].kind == MATRIX_OUT && port2.bq[0].idx == 1
+         && port2.bq[0].stage == 0 && !isPassthrough(port2.bq[0]));  // the active PEQ's biquad only
+  port2.bq.clear();
   assert(b.loadPreset(saved).empty());
   assert(b.savePreset() == saved);
-  assert(port2.bq.size() == 10 * 4);  // every biquad of every Channel
+  assert(port2.bq.size() == 1 && port2.bq[0].stage == 0 && isPassthrough(port2.bq[0]));  // bypassed
   assert(stateOf(b)["outs"][1]["slots"][0]["bypass"] == true);
   // a preset without slots (older file) still loads
   FakePort port3;
@@ -1346,8 +1357,9 @@ static void polarityDelayAndBypassRoundTripThroughPresets()
   MatrixModel m2(port2, 2, 8);
   assert(m2.loadPreset(saved).empty());
   assert(m2.savePreset() == saved);
-  assert(only(port2, 'p').size() == 8 && only(port2, 'd').size() == 8);
-  assert(only(port2, 'p')[4].val == 1.0 && only(port2, 'd')[4].val == 0);
+  // only the differing block: the bypassed delay is 0 samples on the DSP as before
+  assert(only(port2, 'p').size() == 1 && only(port2, 'd').empty());
+  assert(only(port2, 'p')[0].idx == 4 && only(port2, 'p')[0].val == 1.0);
   DynamicJsonDocument st = stateOf(m2);
   assert(st["outs"][4]["delaySamples"] == 48 && st["outs"][4]["delayBypass"] == true && st["outs"][4]["gainBypass"] == true);
   // undo restores the new fields
@@ -1663,6 +1675,142 @@ static void stateCarriesTheActivePreset()
   assert(stateOf(m)["nout"] == 8);
 }
 
+// Ticket 02: a Preset load writes only the blocks that differ from the current state.
+
+static void loadingTheCurrentStateEmitsNothing()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":2,\"mute\":false,\"route\":2,\"slot\":{\"op\":\"add\",\"type\":\"peq\",\"freq\":500,\"gain\":-3}}").empty());
+  const std::string same = m.savePreset();
+  port.w.clear(); port.bq.clear(); port.events.clear();
+  MatrixRampSet ramp;
+  ramp.push_back({ MATRIX_BUS, 1, 0.0 });  // stale content is replaced
+  assert(m.loadPreset(same, &ramp).empty());
+  assert(port.w.empty() && port.bq.empty());
+  assert(ramp.empty());
+  m.loadDefaults();  // and the Baseline from the Baseline
+  port.w.clear(); port.bq.clear();
+  m.loadDefaults(&ramp);
+  assert(port.w.empty() && port.bq.empty() && ramp.empty());
+}
+
+// A Preset made from the model's current state plus one patch; the model itself is unchanged.
+static std::string presetWith(const MatrixModel& m, int nbiquad, const char* json)
+{
+  FakePort scratch;
+  MatrixModel other(scratch, 2, 8, nbiquad);
+  assert(other.loadPreset(m.savePreset()).empty());
+  assert(patch(other, json).empty());
+  return other.savePreset();
+}
+
+static void onePeqFrequencyChangeWritesOnlyThatBiquad()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"mute\":false}").empty());
+  for (int k = 0; k < 3; k++)
+    assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"add\",\"freq\":1000,\"q\":1,\"gain\":6}}").empty());
+  const std::string next = presetWith(m, 4, "{\"ch\":\"out\",\"idx\":1,\"slot\":{\"op\":\"set\",\"i\":1,\"freq\":2000}}");
+  port.w.clear(); port.bq.clear();
+  MatrixRampSet ramp;
+  assert(m.loadPreset(next, &ramp).empty());
+  assert(port.w.empty());
+  assert(port.bq.size() == 1 && port.bq[0].kind == MATRIX_OUT && port.bq[0].idx == 1 && port.bq[0].stage == 1);
+  assert(ramp.size() == 1 && ramp[0].kind == MATRIX_OUT && ramp[0].idx == 1 && near(ramp[0].linear, 1.0));
+}
+
+static void slotLayoutChangeWritesTheShiftedBiquadsAndRamps()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 6);
+  const char* adds[] = {
+    "{\"ch\":\"bus\",\"idx\":0,\"slot\":{\"op\":\"add\",\"freq\":100,\"gain\":3}}",
+    "{\"ch\":\"bus\",\"idx\":0,\"slot\":{\"op\":\"add\",\"type\":\"hp\",\"order\":4,\"freq\":80}}",
+    "{\"ch\":\"bus\",\"idx\":0,\"slot\":{\"op\":\"add\",\"freq\":3000,\"gain\":-2}}" };
+  for (int k = 0; k < 3; k++) assert(patch(m, adds[k]).empty());
+  // stages: PEQ 0 | HP4 1,2 | PEQ 3. Deleting the first PEQ shifts the rest down by one.
+  const std::string next = presetWith(m, 6, "{\"ch\":\"bus\",\"idx\":0,\"slot\":{\"op\":\"del\",\"i\":0}}");
+  port.w.clear(); port.bq.clear();
+  MatrixRampSet ramp;
+  assert(m.loadPreset(next, &ramp).empty());
+  assert(port.w.empty());  // gain unchanged: no write
+  assert(port.bq.size() == 4);
+  for (int s = 0; s < 4; s++)
+    assert(port.bq[s].kind == MATRIX_BUS && port.bq[s].idx == 0 && port.bq[s].stage == s);
+  assert(isPassthrough(port.bq[3]) && !isPassthrough(port.bq[2]));
+  assert(ramp.size() == 1 && rampHas(ramp, MATRIX_BUS, 0));
+}
+
+static void onlySourceRouteAndFilterDifferencesMarkTheRamp()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 2);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"mute\":false}").empty());
+
+  // mute, gain, delay, polarity and SPDIF out alone: written, no ramp
+  FakePort sp;
+  MatrixModel quiet(sp, 2, 8, 2);
+  assert(quiet.loadPreset(m.savePreset()).empty());
+  assert(patch(quiet, "{\"ch\":\"out\",\"idx\":0,\"gain\":-6}").empty());
+  assert(patch(quiet, "{\"ch\":\"out\",\"idx\":2,\"mute\":false,\"polarity\":true,\"delayUs\":1000}").empty());
+  assert(patch(quiet, "{\"ch\":\"bus\",\"idx\":1,\"mute\":true}").empty());
+  assert(patch(quiet, "{\"ch\":\"spdif\",\"sel\":65540}").empty());  // USB 5+6
+  port.w.clear(); port.bq.clear();
+  MatrixRampSet ramp;
+  ramp.push_back({ MATRIX_OUT, 7, 1.0 });  // replaced by the (empty) set
+  assert(m.loadPreset(quiet.savePreset(), &ramp).empty());
+  assert(ramp.empty());
+  assert(port.bq.empty());
+  int g = 0, p = 0, d = 0, o = 0;
+  for (size_t i = 0; i < port.w.size(); i++)
+  {
+    g += port.w[i].type == 'g';
+    p += port.w[i].type == 'p';
+    d += port.w[i].type == 'd';
+    o += port.w[i].type == 'o';
+  }
+  assert(g == 3 && p == 1 && d == 1 && o == 1 && port.w.size() == 6);
+  const Write& spdif = port.w.back();
+  assert(spdif.type == 'o' && spdif.val == 65540 && spdif.idx == 65541);
+
+  // Source, route and filter differences each mark their Channel
+  FakePort sp2;
+  MatrixModel loud(sp2, 2, 8, 2);
+  assert(loud.loadPreset(m.savePreset()).empty());
+  assert(patch(loud, "{\"ch\":\"bus\",\"idx\":1,\"source\":131075}").empty());
+  assert(patch(loud, "{\"ch\":\"out\",\"idx\":4,\"route\":1}").empty());
+  assert(patch(loud, "{\"ch\":\"out\",\"idx\":6,\"slot\":{\"op\":\"add\",\"gain\":4}}").empty());
+  assert(m.loadPreset(loud.savePreset(), &ramp).empty());
+  assert(ramp.size() == 3 && rampHas(ramp, MATRIX_BUS, 1) && rampHas(ramp, MATRIX_OUT, 4) && rampHas(ramp, MATRIX_OUT, 6));
+}
+
+static void failedLoadLeavesModelAndWritesUntouched()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 2);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":3,\"mute\":false,\"route\":2,\"slot\":{\"op\":\"add\",\"gain\":4}}", 100).empty());
+  const std::string before = m.savePreset();
+  // valid up to a bad Slot in the last Output; everything before it would differ
+  FakePort sp;
+  MatrixModel other(sp, 2, 8, 2);
+  assert(patch(other, "{\"ch\":\"bus\",\"idx\":0,\"source\":131075}").empty());
+  DynamicJsonDocument doc(16384);
+  assert(!deserializeJson(doc, other.savePreset()));
+  doc["outs"][7]["slots"].add("garbage");
+  std::string bad;
+  serializeJson(doc, bad);
+  port.w.clear(); port.bq.clear();
+  MatrixRampSet ramp;
+  ramp.push_back({ MATRIX_OUT, 7, 0.5 });
+  assert(!m.loadPreset(bad, &ramp).empty());
+  assert(!m.loadPreset("not json", &ramp).empty());
+  assert(m.savePreset() == before && m.dirty());
+  assert(port.w.empty() && port.bq.empty());
+  assert(ramp.size() == 1 && ramp[0].idx == 7 && ramp[0].linear == 0.5);
+}
+
 int main()
 {
   editResultsDistinguishSuccessBadRequestAndConflict();
@@ -1729,11 +1877,16 @@ int main()
   sourceChangeRampsTheBus();
   invalidPatchesAreRejectedWithoutSideEffects();
   namesAreStoredWithoutDspWrites();
-  presetRoundTripAndFullWriteSetOnLoad();
+  presetRoundTripWritesOnlyTheDifference();
   badPresetIsRejectedAndKeepsState();
-  loadDefaultsResetsAndWritesEverything();
+  loadDefaultsResetsAndWritesTheDifference();
   saveIsDueTwoSecondsAfterTheLastChange();
   presetSwitchRejectsAnOverlappingEditAndKeepsPresetAssociation();
+  loadingTheCurrentStateEmitsNothing();
+  onePeqFrequencyChangeWritesOnlyThatBiquad();
+  slotLayoutChangeWritesTheShiftedBiquadsAndRamps();
+  onlySourceRouteAndFilterDifferencesMarkTheRamp();
+  failedLoadLeavesModelAndWritesUntouched();
   printf("all tests passed\n");
   return 0;
 }
