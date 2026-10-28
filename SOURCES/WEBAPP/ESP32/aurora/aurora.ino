@@ -741,6 +741,7 @@ void increase_volume(void) {
   if( masterVolume.val > 0.f )
     masterVolume.val = 0.f;
   setMasterVolume();
+  matrixMasterVolumeChanged();
 }
 
 void decrease_volume(void) {
@@ -748,6 +749,7 @@ void decrease_volume(void) {
   if( masterVolume.val <= -80.f )
     masterVolume.val = -80.f;
   setMasterVolume();
+  matrixMasterVolumeChanged();
 }
 
 //==============================================================================
