@@ -50,6 +50,22 @@ struct MatrixCoef
 #define MATRIX_SAVE_DELAY_MS 2000
 #define MATRIX_RAMP_MS 20  // gain slew to settle before a route/Source switch or a biquad write
 
+/*! Why a live edit was rejected, or that it was accepted. */
+enum MatrixEditStatus
+{
+  MATRIX_EDIT_OK,
+  MATRIX_EDIT_BAD_REQUEST,  // the patch itself is invalid
+  MATRIX_EDIT_CONFLICT      // a Preset switch is in progress or the patch was made against another Preset
+};
+
+/*! Outcome of a live edit; reason is "" when accepted, else the text for the user. */
+struct MatrixEditResult
+{
+  MatrixEditStatus status;
+  std::string reason;
+  bool ok( void ) const { return status == MATRIX_EDIT_OK; }
+};
+
 class MatrixModel
 {
 public:
@@ -71,14 +87,21 @@ public:
    *  Slots sit on the Channel's biquads in the order added, each taking cost() of them: Butterworth
    *  order n = ceil(n/2), Linkwitz-Riley order n = n/2, everything else 1. An add or a type/order
    *  change that would exceed the budget is rejected.
-   *  Returns "" on success, else the rejection reason; a rejected patch changes nothing. */
-  std::string apply( JsonObject patch, uint32_t nowMs );
+   *  An optional "preset" field names the Preset the patch was made against; if it is not
+   *  the active one, or a Preset switch is in progress, the patch is a conflict.
+   *  A rejected patch changes nothing. */
+  MatrixEditResult apply( JsonObject patch, uint32_t nowMs );
 
   /*! Reject live edits between these calls. The firmware closes this gate
    *  before a preset switch enters the worker queue, so an edit from the old
-   *  preset cannot be queued behind the selected preset's full write set. */
-  void beginPresetSwitch( void ) { presetSwitching_ = true; }
+   *  preset cannot be queued behind the selected preset's full write set.
+   *  begin returns false (and changes nothing) if a switch is already in progress. */
+  bool beginPresetSwitch( void );
   void endPresetSwitch( void ) { presetSwitching_ = false; }
+
+  /*! The Preset the state belongs to; reported by stateJson() and checked by apply(). */
+  void setPreset( int preset ) { preset_ = preset; }
+  int preset( void ) const { return preset_; }
 
   /*! Reverts the last accepted apply() (model only, not the DSP writes), e.g. when
    *  the writes could not be queued. A second call does nothing. */
@@ -111,6 +134,7 @@ public:
 private:
   void reset( void );
   void saveUndo( void );
+  std::string applyPatch( JsonObject patch, uint32_t nowMs );
 
   enum SlotType { SLOT_PEQ, SLOT_HP, SLOT_LP, SLOT_LSHELF, SLOT_HSHELF, SLOT_PHASE };
 
@@ -180,6 +204,7 @@ private:
   bool dirty_;
   uint32_t lastChange_;
   bool presetSwitching_;
+  int preset_;
 
   struct Undo
   {
