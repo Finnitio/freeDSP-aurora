@@ -49,6 +49,14 @@ async function main() {
     mute: true,
   });
 
+  await context.send("out", 3, { gain: -2 });
+  assert.deepStrictEqual(JSON.parse(request.options.body), {
+    ch: "out",
+    idx: 3,
+    preset: 2,
+    gain: -2,
+  });
+
   context.st = {
     buses: [{ gain: 12, gainBypass: false, slots: [] }],
     outs: [{ gain: -7.5, gainBypass: false, slots: [] }],

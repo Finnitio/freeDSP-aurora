@@ -94,6 +94,9 @@ function preset(p){
 // Sends a patch, the reply is the new state or the reason it was refused.
 function send(ch,idx,f){
   var p={ch:ch,idx:idx,preset:activePreset};for(var k in f)p[k]=f[k];
+  return post(p);
+}
+function post(p){
   var n=++seq;  // replies older than one already shown are ignored
   return fetch("/matrix",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)})
    .then(function(r){return r.text().then(function(t){
@@ -120,7 +123,7 @@ function opts(list,sel,val,txt){
 }
 function linkOpts(ch,sel){
   var ids=ch=="bus"?["","bus"]:["","A","B","C","D"];
-  return ids.map(function(id){var name=id||(ch=="bus"?"No link":"No link");if(id=="bus")name="Bus link";
+  return ids.map(function(id){var name=id=="bus"?"Bus link":id||"No link";
     return "<option value='"+id+"'"+(id==sel?" selected":"")+">"+name+"</option>";}).join("");
 }
 function row(ch,idx,c,sel){
@@ -132,9 +135,10 @@ function row(ch,idx,c,sel){
    +"<input type='range' class='gain' min='"+st.gainmin+"' max='"+st.gainmax+"' step='0.5' value='"+c.gain+"' oninput=\"sendGain('"+ch+"',"+idx+",this.value)\" onchange=\"send('"+ch+"',"+idx+",{gain:parseFloat(this.value)})\">"
    +"<span class='gv' id='gv"+ch+idx+"'>"+c.gain+" dB</span></div>";
 }
-function sendLink(scope,id,key,value){var f={};f[key]=value;var p={ch:"link",scope:scope,group:id,preset:activePreset};for(var k in f)p[k]=f[k];
-  var n=++seq;return fetch("/matrix",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)})
-   .then(function(r){return r.text().then(function(t){if(r.ok){if(n<seen)return;seen=n;st=JSON.parse(t);say("");}else{say(t);if(r.status==409)load();}draw();});});}
+function sendLink(scope,id,key,value){
+  var p={ch:"link",scope:scope,group:id,preset:activePreset};p[key]=value;
+  return post(p);
+}
 function linkPanel(scope,l){
   var keys=["mute","filters","gain","delay"],names=["Mute","Filters","Gain","Delay"];
   return "<div class='row linkset'><b>"+(scope=="bus"?"Bus link":l.id)+"</b>"+keys.map(function(k,i){

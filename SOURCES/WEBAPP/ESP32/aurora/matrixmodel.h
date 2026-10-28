@@ -45,9 +45,10 @@ struct MatrixCoef
 #define MATRIX_MAX_BUS 2
 #define MATRIX_MAX_OUT 8
 #define MATRIX_NAME_LEN 16
+#define MATRIX_OUT_LINKS 4  // Output Link groups A..D
 #define MATRIX_MAX_DELAY_SAMPLES 1920  // 40 ms at 48 kHz
 #define MATRIX_SAVE_DELAY_MS 2000
-#define MATRIX_RAMP_MS 20  // gain slew to settle before a route or Source switch
+#define MATRIX_RAMP_MS 20  // gain slew to settle before a route/Source switch or a Slot layout change
 
 class MatrixModel
 {
@@ -65,7 +66,8 @@ public:
    *  or "lr" (order 2, 4, 8), default order 2; shelf slope 0.1-1.
    *  SPDIF out: {"ch":"spdif","sel":code} with the left code of one of the offered pairs (stateJson "spdifopts").
    *  Link settings: {"ch":"link","scope":"bus"|"out","group":"bus"|"A".."D",
-   *  "mute"|"filters"|"gain"|"delay":bool}. Buses cannot link delay.
+   *  "mute"|"filters"|"gain"|"delay":bool}. Buses cannot link delay. A Channel joining a group takes
+   *  over its linked aspects, so a patch that joins cannot also set them.
    *  Slots sit on the Channel's biquads in the order added, each taking cost() of them: Butterworth
    *  order n = ceil(n/2), Linkwitz-Riley order n = n/2, everything else 1. An add or a type/order
    *  change that would exceed the budget is rejected.
@@ -125,6 +127,7 @@ private:
   static int cost( const Slot& s );
   static int choiceCount( void );
   static Slot choice( int n );  // the n-th selectable type/order, other fields default
+  static const char* paramOutOfRange( const Slot& s );  // NULL if freq, q, gain, slope are in range
   static const char* normalizeSlot( Slot& s );  // NULL if the final Slot invariants hold
   static int slotCoefs( const Slot& s, MatrixCoef* out );
 
@@ -151,11 +154,19 @@ private:
 
   double linear( const Channel& c ) const;
   static int used( const Channel& c );  // biquads taken by the Slots
+  static bool layoutChanged( const Channel& before, const Channel& after );
   int slotCount( void ) const;
   std::string applySlot( JsonObject op, Channel& c ) const;
   void stages( const Channel& c, std::vector<Coef>& out ) const;
   void writeStages( MatrixChannelKind kind, int idx, const Channel& c, const Channel* prev );
-  void writeChannelChanges( bool isBus, int idx, const Channel& before, const Channel& after );
+  struct Snapshot
+  {
+    Channel bus[MATRIX_MAX_BUS];
+    Channel out[MATRIX_MAX_OUT];
+  };
+  bool needsRamp( const Channel& before, const Channel& after ) const;
+  void snapshot( Snapshot& s ) const;
+  void writeChanges( const Snapshot& before );
   void putChannel( JsonArray arr, const Channel& c, const char* selKey, bool withLimits ) const;
   std::string readChannel( JsonObject o, bool isBus, Channel& c ) const;
 
@@ -165,7 +176,7 @@ private:
   Channel bus_[MATRIX_MAX_BUS];
   Channel out_[MATRIX_MAX_OUT];
   LinkGroup busLink_;
-  LinkGroup outLink_[4];
+  LinkGroup outLink_[MATRIX_OUT_LINKS];
   uint32_t spdif_;  // left code of the SPDIF out pair
   bool dirty_;
   uint32_t lastChange_;
@@ -178,7 +189,7 @@ private:
     Channel bus[MATRIX_MAX_BUS];
     Channel out[MATRIX_MAX_OUT];
     LinkGroup busLink;
-    LinkGroup outLink[4];
+    LinkGroup outLink[MATRIX_OUT_LINKS];
     bool dirty;
     uint32_t lastChange;
   } undo_;

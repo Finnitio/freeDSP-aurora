@@ -660,6 +660,76 @@ static void multiBiquadEditsAreRampedAndSingleBiquadEditsStayLive()
   assert(port.events.back().type == 'g' && near(port.events.back().val, std::pow(10.0, -6.0 / 20)));
 }
 
+// Spec 36/37: dragging a slider of a multi-biquad Slot applies live without muting.
+// Only a stage layout shift (add, delete, type/design/order change) ramps the Channel.
+static void parameterEditsOfAMultiBiquadSlotStayLive()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 6);
+  assert(patch(m, "{\"ch\":\"bus\",\"idx\":0,\"gain\":-6}").empty());
+  assert(addSlot(m, "\"type\":\"lp\",\"design\":\"lr\",\"order\":8,\"freq\":2000", "bus", 0).empty());
+
+  port.events.clear();
+  assert(setSlot(m, 0, "\"freq\":2500", "bus", 0).empty());
+  assert(port.events.size() == 4);
+  for (int stage = 0; stage < 4; stage++)
+    assert(port.events[stage].type == 'b' && port.events[stage].val == stage);
+
+  // bypass keeps the Slot's stages allocated, so no other Slot moves: no ramp either
+  port.events.clear();
+  assert(setSlot(m, 0, "\"bypass\":true", "bus", 0).empty());
+  assert(port.events.size() == 4);
+  for (size_t k = 0; k < port.events.size(); k++)
+    assert(port.events[k].type == 'b');
+}
+
+static std::vector<Write> only(const FakePort& port, char type);
+
+static int countEvents(const FakePort& port, char type)
+{
+  int n = 0;
+  for (size_t k = 0; k < port.events.size(); k++)
+    if (port.events[k].type == type)
+      n++;
+  return n;
+}
+
+// A patch ramps each Channel at most once: down, one wait, every write, up.
+static void routeSwitchAndLayoutChangeRampOnce()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"mute\":false,\"gain\":-6}").empty());
+  port.events.clear(); port.w.clear();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"route\":2,\"slot\":{\"op\":\"add\",\"type\":\"lp\",\"design\":\"lr\",\"order\":4}}").empty());
+  assert(countEvents(port, 'w') == 1);
+  assert(countEvents(port, 'g') == 2);
+  assert(port.events.front().type == 'g' && port.events.front().val == 0.0);
+  assert(port.events[1].type == 'w');
+  assert(port.events.back().type == 'g' && near(port.events.back().val, std::pow(10.0, -6.0 / 20)));
+  assert(countEvents(port, 'b') == 2 && only(port, 'r').size() == 1);
+}
+
+// Linked members ramp together: all down, one wait, all writes, all up.
+static void linkedLayoutChangeRampsMembersTogether()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  for (int o = 2; o < 4; o++)
+    assert(patch(m, ("{\"ch\":\"out\",\"idx\":" + std::to_string(o) + ",\"mute\":false,\"link\":\"B\"}").c_str()).empty());
+  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"B\",\"filters\":true}").empty());
+  port.events.clear();
+  assert(addSlot(m, "\"type\":\"hp\",\"design\":\"lr\",\"order\":4", "out", 2).empty());
+  assert(port.events.size() == 2 + 1 + 4 + 2);
+  assert(port.events[0].type == 'g' && port.events[0].val == 0.0 && port.events[0].idx == 2);
+  assert(port.events[1].type == 'g' && port.events[1].val == 0.0 && port.events[1].idx == 3);
+  assert(port.events[2].type == 'w');
+  for (int k = 3; k < 7; k++)
+    assert(port.events[k].type == 'b');
+  assert(port.events[7].type == 'g' && near(port.events[7].val, 1.0) && port.events[7].idx == 2);
+  assert(port.events[8].type == 'g' && near(port.events[8].val, 1.0) && port.events[8].idx == 3);
+}
+
 static void bypassOfAMultiBiquadSlotKeepsItsStages()
 {
   FakePort port;
@@ -989,6 +1059,11 @@ static void slotRulesAreTheSameForEditsAndPresets()
   FakePort invalidPort;
   MatrixModel invalidModel(invalidPort, 2, 8, 8);
   assert(addSlot(invalidModel, "\"type\":\"hp\",\"design\":\"lr\",\"order\":6,\"freq\":19") == "freq out of range");
+  assert(addSlot(invalidModel, "\"type\":\"peq\"").empty());
+  assert(setSlot(invalidModel, 0, "\"freq\":5,\"bypass\":\"x\"") == "freq out of range");
+  assert(setSlot(invalidModel, 0, "\"freq\":5,\"type\":\"bogus\"") == "freq out of range");
+  assert(setSlot(invalidModel, 0, "\"q\":50,\"design\":\"x\"") == "q out of range");
+  assert(setSlot(invalidModel, 0, "\"freq\":5,\"q\":\"x\"") == "freq out of range");
 
   // Non-crossover design/order are accepted for compatibility, then normalized
   // through both paths so a later type change cannot revive hidden settings.
@@ -1293,6 +1368,34 @@ static void linkedAspectsPropagateAndJoiningCopiesAbsoluteValues()
   assert(st["outs"][0]["mute"] == false && st["outs"][1]["mute"] == true); // leaving keeps its value
 }
 
+// Spec 45: a joiner takes over the group's linked settings, so a patch that joins and
+// also sets a linked aspect is ambiguous and rejected; unlinked aspects are fine.
+static void joiningRejectsLinkedSettingsInTheSamePatch()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"mute\":false,\"gain\":-3,\"link\":\"A\"}").empty());
+  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"A\",\"mute\":true,\"gain\":true}").empty());
+  const std::string before = m.savePreset();
+  port.w.clear();
+  std::string err = patch(m, "{\"ch\":\"out\",\"idx\":1,\"gain\":4,\"link\":\"A\"}");
+  assert(err == "a Channel joining a link group takes over its linked gain");
+  err = patch(m, "{\"ch\":\"out\",\"idx\":1,\"link\":\"A\",\"mute\":true}");
+  assert(err == "a Channel joining a link group takes over its linked mute");
+  assert(port.w.empty() && m.savePreset() == before);
+
+  // delay is not linked in A: allowed, and the gain is taken over
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"delayUs\":1000,\"link\":\"A\"}").empty());
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["outs"][1]["gain"] == -3 && st["outs"][1]["delaySamples"] == 48);
+  // already a member: editing a linked aspect together with the same link is an ordinary edit
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"gain\":2,\"link\":\"A\"}").empty());
+  assert(stateOf(m)["outs"][0]["gain"] == 2);
+  // first member of an empty group: nothing to take over
+  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"C\",\"gain\":true}").empty());
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":5,\"gain\":-1,\"link\":\"C\"}").empty());
+}
+
 static void eachLinkAspectCanBeEnabledIndependently()
 {
   FakePort port;
@@ -1354,6 +1457,7 @@ int main()
 {
   linkMembershipHasSeparateBusAndOutputScopes();
   linkedAspectsPropagateAndJoiningCopiesAbsoluteValues();
+  joiningRejectsLinkedSettingsInTheSamePatch();
   eachLinkAspectCanBeEnabledIndependently();
   enablingAnAspectMakesExistingMembersConsistent();
   linkGroupsRoundTripAndUndoTogether();
@@ -1377,6 +1481,9 @@ int main()
   slotCostPerTypeAndOrder();
   slotsArepackedInOrder();
   multiBiquadEditsAreRampedAndSingleBiquadEditsStayLive();
+  parameterEditsOfAMultiBiquadSlotStayLive();
+  routeSwitchAndLayoutChangeRampOnce();
+  linkedLayoutChangeRampsMembersTogether();
   bypassOfAMultiBiquadSlotKeepsItsStages();
   typeCoefficientsGiveTheExpectedResponse();
   slopeChangesTheShelf();
