@@ -18,6 +18,7 @@ input.name{height:30px}
 select{flex:1 1 80px;min-width:0;width:80px;height:30px;border:1px solid #808080;border-radius:2px;color:#fff}
 .gain{flex:2 1 100px;min-width:0}
 .gv{flex:0 0 64px;text-align:right}
+input.num{flex:0 0 76px;width:76px;height:30px;text-align:right}
 button.mute{width:56px;height:30px;border-top-width:1px}
 button.on{background-color:#802020}
 #msg{color:#e08080;min-height:18px}
@@ -72,7 +73,7 @@ button:disabled{opacity:.4}
 <div class="row"><button onclick="storeAp()">Store AP config</button><button onclick="closeWifi()">Close</button></div>
 </div></div>
 <script>
-var st=null,timers={},seq=0,seen=0,late=false,view=null,cf=null,cseq=0,lv={},csig="",ct=0,activePreset=-1;
+var st=null,seq=0,seen=0,late=false,view=null,cf=null,cseq=0,csig="",ct=0,activePreset=-1;
 function say(t){document.getElementById("msg").textContent=t||"";}
 function waitIdle(){return fetch("/idle").then(function(r){return r.text();}).then(function(t){
   if(t=="1")return;return new Promise(function(r){setTimeout(r,100);}).then(waitIdle);});}
@@ -100,7 +101,6 @@ function drawPresets(cur){
   document.getElementById("presets").innerHTML=h;
 }
 function preset(p){
-  cancelLive();
   say("Switching preset...");
   fetch("/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pre:p})})
    .then(function(r){return r.text().then(function(t){if(!r.ok)throw new Error(t||"Preset switch failed");});})
@@ -119,19 +119,39 @@ function post(p){
      if(r.ok){if(n<seen)return;seen=n;st=JSON.parse(t);say("");}else{say(t);if(r.status==409)load();}
      draw();});});
 }
-// Sliders are sent while dragging: at once, then at most every 100 ms with the latest value.
-function live(k,ch,idx,f){
-  var e=lv[k]||(lv[k]={t:0,p:null});e.p=f;if(e.t)return;
-  var go=function(){var p=e.p;e.p=null;if(!p){e.t=0;return;}send(ch,idx,p);e.t=setTimeout(go,100);};
-  go();
+// ---- text fields: a value is sent on Commit (Enter, Tab or click outside), never while typing.
+// data-v is the value the field stands for; a Commit of that value sends nothing, Escape restores it.
+// i is the Slot index, -1 for a Channel value (gain, delayUs).
+function fmt(key,v){return String(key=="delayUs"?parseFloat(v.toFixed(1)):parseFloat(v.toPrecision(6)));}
+function field(id,ch,idx,i,key,v){
+  var t=fmt(key,v);
+  return "<input type='text' class='num' id='"+id+"'"+(key=="gain"?"":" inputmode='decimal'")  // phone decimal pads lack a minus
+   +" value='"+t+"' data-v='"+t+"' data-ch='"+ch+"' data-idx='"+idx+"' data-i='"+i+"' data-key='"+key+"'"
+   +" onkeydown='fieldKey(event,this)' onblur='commit(this)'>";
 }
-function cancelLive(){
-  for(var k in lv){if(lv[k].t)clearTimeout(lv[k].t);lv[k].t=0;lv[k].p=null;}
-  lv={};
+function num(t){t=String(t).trim().replace(",",".");return t===""?NaN:Number(t);}
+function fieldKey(e,el){
+  if(e.key=="Enter"){e.preventDefault();commit(el);}
+  else if(e.key=="Escape"){e.preventDefault();el.value=el.dataset.v;}
 }
-function sendGain(ch,idx,v){
-  document.getElementById("gv"+ch+idx).textContent=v+" dB";
-  live("g"+ch+idx,ch,idx,{gain:parseFloat(v)});
+// Text that is no number is sent as null: the firmware's reply names the problem and the field reverts.
+function commit(el){
+  var d=el.dataset,x=num(el.value);
+  if(el.value==d.v||x===num(d.v))return;
+  d.v=el.value;  // until the reply: Enter followed by Tab sends once
+  var i=parseInt(d.i),f={};
+  if(i<0)f[d.key]=x;else{f.slot={op:"set",i:i};f.slot[d.key]=x;}
+  send(d.ch,parseInt(d.idx),f);
+}
+// Without a rebuild the fields still follow the model, except the one being typed in.
+function syncFields(){
+  var a=document.activeElement;
+  Array.prototype.forEach.call(document.querySelectorAll("input.num"),function(el){
+    var d=el.dataset,c=(d.ch=="bus"?st.buses:st.outs)[d.idx],i=parseInt(d.i);
+    var o=c&&(i<0?c:c.slots[i]);
+    if(!o||typeof o[d.key]!="number"||(el===a&&el.value!=d.v))return;
+    el.value=d.v=fmt(d.key,o[d.key]);
+  });
 }
 function esc(s){return s.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");}
 function opts(list,sel,val,txt){
@@ -148,8 +168,7 @@ function row(ch,idx,c,sel){
    +"<select title='Link group' onchange=\"send('"+ch+"',"+idx+",{link:this.value})\">"+linkOpts(ch,c.link)+"</select>"
    +"<button class='mute"+(c.mute?" on":"")+"' onclick=\"send('"+ch+"',"+idx+",{mute:"+!c.mute+"})\">"+(c.mute?"Muted":"Mute")+"</button>"
    +"<button class='mute' onclick=\"openF('"+ch+"',"+idx+")\">Filter</button>"
-   +"<input type='range' class='gain' min='"+st.gainmin+"' max='"+st.gainmax+"' step='0.5' value='"+c.gain+"' oninput=\"sendGain('"+ch+"',"+idx+",this.value)\" onchange=\"send('"+ch+"',"+idx+",{gain:parseFloat(this.value)})\">"
-   +"<span class='gv' id='gv"+ch+idx+"'>"+c.gain+" dB</span></div>";
+   +field("g"+ch+idx,ch,idx,-1,"gain",c.gain)+"<span>dB</span></div>";
 }
 function sendLink(scope,id,key,value){
   var p={ch:"link",scope:scope,group:id,preset:activePreset};p[key]=value;
@@ -176,8 +195,8 @@ function draw(){
   st.outs.forEach(function(c,i){
     o+=row("out",i,c,"<select onchange=\"send('out',"+i+",{route:parseInt(this.value)})\">"+opts(st.routes,c.route,function(s,j){return j;},function(s){return s;})+"</select>");
   });
-  // do not rebuild under an open select, a name being typed or a slider being dragged
-  if(busy("#buses,#outs")){late=true;return;}
+  // do not rebuild under an open select or a field being typed in
+  if(busy("#buses,#outs")){late=true;syncFields();return;}
   late=false;
   document.getElementById("buslinks").innerHTML=linkPanel("bus",st.links.bus);
   document.getElementById("outlinks").innerHTML=st.links.outs.map(function(l){return linkPanel("out",l);}).join("");
@@ -201,32 +220,15 @@ function openF(ch,i){view={ch:ch,idx:i};cf=null;cseq++;csig="";late=false;  // d
   drawF();}
 function closeF(){view=null;late=false;
   document.getElementById("main").style.display="";document.getElementById("flt").style.display="none";draw();}
-function fpos(f){return Math.round(1000*Math.log(f/st.peq.fmin)/Math.log(st.peq.fmax/st.peq.fmin));}
-function fval(p){return parseFloat((st.peq.fmin*Math.pow(st.peq.fmax/st.peq.fmin,p/1000)).toPrecision(4));}
-// val: the slider position (Freq: log steps); the label shows the model's own value, shown
-function shown(v){return parseFloat(v.toPrecision(4));}
-function slider(i,lbl,key,min,max,step,val,unit,shownVal){
-  var id="s"+i+key;
-  return "<div class='row'><span class='lbl'>"+lbl+"</span><input type='range' id='"+id+"i' class='gain' min='"+min+"' max='"+max+"' step='"+step+"' value='"+val+"'"
-   +" oninput=\"slotSet("+i+",'"+key+"',this.value)\" onchange=\"slotSend("+i+",'"+key+"',this.value)\">"
-   +"<span class='gv' id='"+id+"'>"+shown(shownVal)+" "+unit+"</span></div>";
+function param(i,lbl,key,s){
+  return "<div class='row'><span class='lbl'>"+lbl+"</span>"+field("s"+i+key,view.ch,view.idx,i,key,s[key])
+   +"<span>"+UNIT[key]+"</span></div>";
 }
-function slotVal(key,v){return key=="freq"?fval(parseInt(v)):parseFloat(v);}
 var UNIT={freq:"Hz",q:"",gain:"dB",slope:""};
 // the parameters each Slot type has
 var KEYS={peq:["freq","q","gain"],hp:["freq"],lp:["freq"],lshelf:["freq","gain","slope"],hshelf:["freq","gain","slope"],phase:["freq","q"]};
 var TNAME={peq:"PEQ",hp:"HP",lp:"LP",lshelf:"Low shelf",hshelf:"High shelf",phase:"Phase"};
 function cname(o){return o.d?o.d.toUpperCase()+" "+o.o:TNAME[o.t];}
-function slotSet(i,key,v){
-  var x=slotVal(key,v);
-  document.getElementById("s"+i+key).textContent=x+" "+UNIT[key];
-  var f={op:"set",i:i};f[key]=x;
-  live("s"+i+key,view.ch,view.idx,{slot:f});
-}
-function slotSend(i,key,v){
-  var f={op:"set",i:i};f[key]=slotVal(key,v);
-  send(view.ch,view.idx,{slot:f});
-}
 function addSlot(){send(view.ch,view.idx,{slot:{op:"add"}});}
 function delSlot(i){send(view.ch,view.idx,{slot:{op:"del",i:i}});}
 function bypass(i,b){send(view.ch,view.idx,{slot:{op:"set",i:i,bypass:b}});}
@@ -244,40 +246,30 @@ function orderSel(i,s){
     if(o.t!=s.type)return "";
     return "<option value='"+j+"'"+(o.d==s.design&&o.o==s.order?" selected":"")+(o.c<=s.avail?"":" disabled")+">"+cname(o)+" ("+o.c+")</option>";}).join("")+"</select>";
 }
-function topGain(v){
-  document.getElementById("tgv").textContent=v+" dB";
-  live("tg"+view.ch+view.idx,view.ch,view.idx,{gain:parseFloat(v)});
-}
 function sendTop(f){send(view.ch,view.idx,f);}
 // gain block (all Channels), polarity and delay (Outputs only)
 function topHtml(c){
   var h="<div class='slot'><div class='row'><b class='name'>Gain</b>"
    +"<button class='mute"+(c.gainBypass?" on":"")+"' onclick='sendTop({gainBypass:"+!c.gainBypass+"})'>Bypass</button></div>"
-   +"<div class='row'><input type='range' id='tgi' class='gain' min='"+st.gainmin+"' max='"+st.gainmax+"' step='0.5' value='"+c.gain+"' oninput='topGain(this.value)' onchange='sendTop({gain:parseFloat(this.value)})'>"
-   +"<span class='gv' id='tgv'>"+c.gain+" dB</span></div></div>";
+   +"<div class='row'>"+field("tg"+view.ch+view.idx,view.ch,view.idx,-1,"gain",c.gain)+"<span>dB</span></div></div>";
   if(view.ch!="out")return h;
   h+="<div class='slot'><div class='row'><b class='name'>Polarity</b>"
    +"<button class='mute"+(c.polarity?" on":"")+"' onclick='sendTop({polarity:"+!c.polarity+"})'>"+(c.polarity?"Inverted":"Normal")+"</button></div></div>";
   h+="<div class='slot'><div class='row'><b class='name'>Delay</b>"
    +"<button class='mute"+(c.delayBypass?" on":"")+"' onclick='sendTop({delayBypass:"+!c.delayBypass+"})'>Bypass</button></div>"
-   +"<div class='row'><input type='number' class='name' min='0' max='"+Math.floor(st.delaymax*1e6/48000)+"' step='1' value='"+Math.round(c.delayUs)+"' onchange='sendTop({delayUs:parseFloat(this.value)})'><span>&micro;s</span></div>"
+   +"<div class='row'>"+field("td"+view.ch+view.idx,view.ch,view.idx,-1,"delayUs",c.delayUs)
+   +"<span>&micro;s (max "+Math.floor(st.delaymax*1e6/48000)+")</span></div>"
    +"<div class='row' id='dapp'>"+applied(c)+"</div></div>";
   return h;
 }
 function applied(c){
   return "Applied: "+c.delayUs.toFixed(1)+" &micro;s = "+c.delaySamples+" samples = "+c.delayMm.toFixed(1)+" mm"+(c.delayBypass?" (bypassed)":"");
 }
-// While an input has focus the DOM stays, but the readouts and labels follow the model.
+// While an input has focus the DOM stays, but the fields and labels follow the model.
 function refreshLabels(c){
-  var a=document.activeElement?document.activeElement.id:"",e;
+  var e;
   if(view.ch=="out"&&(e=document.getElementById("dapp")))e.innerHTML=applied(c);
-  if(a!="tgi"&&(e=document.getElementById("tgv")))e.textContent=c.gain+" dB";
-  c.slots.forEach(function(s,i){
-    KEYS[s.type].forEach(function(k){
-      if(a=="s"+i+k+"i")return;
-      if(e=document.getElementById("s"+i+k))e.textContent=shown(s[k])+" "+UNIT[k];
-    });
-  });
+  syncFields();
 }
 function drawF(){
   var c=chan();
@@ -289,16 +281,16 @@ function drawF(){
   if(busy("#slots,#top")){late=true;refreshLabels(c);return;}
   late=false;
   document.getElementById("top").innerHTML=topHtml(c);
-  var h="",p=st.peq;
+  var h="";
   c.slots.forEach(function(s,i){
     var k=KEYS[s.type];
     h+="<div class='slot'><div class='row'>"+typeSel(i,s)+orderSel(i,s)
      +"<button class='mute"+(s.bypass?" on":"")+"' onclick='bypass("+i+","+!s.bypass+")'>Bypass</button>"
      +"<button class='mute' onclick='delSlot("+i+")'>Delete</button></div>"
-     +slider(i,"Freq","freq",0,1000,1,fpos(s.freq),"Hz",s.freq)
-     +(k.indexOf("q")<0?"":slider(i,"Q","q",p.qmin,p.qmax,0.1,s.q,"",s.q))
-     +(k.indexOf("gain")<0?"":slider(i,"Gain","gain",p.gmin,p.gmax,0.5,s.gain,"dB",s.gain))
-     +(k.indexOf("slope")<0?"":slider(i,"Slope","slope",st.slopemin,st.slopemax,0.05,s.slope,"",s.slope))+"</div>";
+     +param(i,"Freq","freq",s)
+     +(k.indexOf("q")<0?"":param(i,"Q","q",s))
+     +(k.indexOf("gain")<0?"":param(i,"Gain","gain",s))
+     +(k.indexOf("slope")<0?"":param(i,"Slope","slope",s))+"</div>";
   });
   document.getElementById("slots").innerHTML=h;
 }
