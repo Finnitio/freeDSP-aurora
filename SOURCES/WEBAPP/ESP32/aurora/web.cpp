@@ -1241,6 +1241,7 @@ void handlePostPresetJson( JsonObject root )
   updateUI();
 
   softUnmuteDAC();
+  matrixEndPresetSwitch();
 }
 
 //==============================================================================
@@ -1875,7 +1876,8 @@ void setupWebserver (void)
         return;
       std::string reply;
       bool ok = matrixApply( doc->as<JsonObject>(), reply );
-      request->send( ok ? 200 : 400, ok ? "application/json" : "text/plain", reply.c_str() );
+      const bool conflict = !ok && ( reply == "preset switch in progress" || reply == "preset changed; refresh the matrix" );
+      request->send( ok ? 200 : conflict ? 409 : 400, ok ? "application/json" : "text/plain", reply.c_str() );
     });
   }
   else if( SPIFFS.exists( "/dsp.html" ) )
@@ -1983,7 +1985,21 @@ void setupWebserver (void)
   });
   server.on( "/preset", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
   {
-    postJson( request, data, len, index, total, handlePostPresetJson );
+    std::shared_ptr<DynamicJsonDocument> doc = readJsonBody( request, data, len, index, total, 1024 );
+    if( !doc )
+      return;
+    if( !matrixBeginPresetSwitch() )
+    {
+      request->send( 409, "text/plain", "preset switch in progress" );
+      return;
+    }
+    if( !i2cPost( [doc]() { handlePostPresetJson( doc->as<JsonObject>() ); } ) )
+    {
+      matrixEndPresetSwitch();
+      request->send( 503, "text/plain", "Busy" );
+    }
+    else
+      request->send( 200, "text/plain", "" );
   });
   server.on( "/config", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
   {

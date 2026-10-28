@@ -70,6 +70,12 @@ public:
    *  Returns "" on success, else the rejection reason; a rejected patch changes nothing. */
   std::string apply( JsonObject patch, uint32_t nowMs );
 
+  /*! Reject live edits between these calls. The firmware closes this gate
+   *  before a preset switch enters the worker queue, so an edit from the old
+   *  preset cannot be queued behind the selected preset's full write set. */
+  void beginPresetSwitch( void ) { presetSwitching_ = true; }
+  void endPresetSwitch( void ) { presetSwitching_ = false; }
+
   /*! Reverts the last accepted apply() (model only, not the DSP writes), e.g. when
    *  the writes could not be queued. A second call does nothing. */
   void undo( void );
@@ -150,6 +156,7 @@ private:
   uint32_t spdif_;  // left code of the SPDIF out pair
   bool dirty_;
   uint32_t lastChange_;
+  bool presetSwitching_;
 
   struct Undo
   {
