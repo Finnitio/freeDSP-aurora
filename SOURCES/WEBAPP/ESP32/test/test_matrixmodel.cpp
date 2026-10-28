@@ -19,12 +19,19 @@ struct Write
 struct FakePort : MatrixPort
 {
   std::vector<Write> w;
-  void writeGain(MatrixChannelKind kind, int idx, double linear) override { w.push_back({ 'g', kind, idx, linear }); }
+  std::vector<Write> events;
+  void record(char type, MatrixChannelKind kind, int idx, double val)
+  {
+    Write write = { type, kind, idx, val };
+    w.push_back(write);
+    events.push_back(write);
+  }
+  void writeGain(MatrixChannelKind kind, int idx, double linear) override { record('g', kind, idx, linear); }
   void writeRoute(int out, int route) override { w.push_back({ 'r', MATRIX_OUT, out, (double)route }); }
   void writeSource(int bus, uint32_t sel) override { w.push_back({ 's', MATRIX_BUS, bus, (double)sel }); }
   void writePolarity(int out, bool invert) override { w.push_back({ 'p', MATRIX_OUT, out, invert ? 1.0 : 0.0 }); }
   void writeDelay(int out, int samples) override { w.push_back({ 'd', MATRIX_OUT, out, (double)samples }); }
-  void waitMs(int ms) override { w.push_back({ 'w', MATRIX_OUT, 0, (double)ms }); }
+  void waitMs(int ms) override { record('w', MATRIX_OUT, 0, (double)ms); }
   void writeSpdifOut(uint32_t left, uint32_t right) override { w.push_back({ 'o', MATRIX_OUT, (int)right, (double)left }); }
   struct Bq
   {
@@ -37,6 +44,7 @@ struct FakePort : MatrixPort
   {
     Bq q = { kind, idx, stage, { a[0], a[1], a[2] }, { b[0], b[1], b[2] } };
     bq.push_back(q);
+    events.push_back({ 'b', kind, idx, (double)stage });
   }
 };
 
@@ -534,6 +542,50 @@ static void slotsArepackedInOrder()
   assert(!isPassthrough(port.bq[0]) && !isPassthrough(port.bq[1]) && !isPassthrough(port.bq[2]));
   assert(port.bq[3].stage == 3 && isPassthrough(port.bq[3]));
   assert(coeffsOf(m, "out", 1)["bq"].size() == 3);
+}
+
+static void multiBiquadEditsAreRampedAndSingleBiquadEditsStayLive()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 5);
+  assert(patch(m, "{\"ch\":\"bus\",\"idx\":0,\"gain\":-6}").empty());
+  assert(addSlot(m, "\"type\":\"peq\",\"freq\":200", "bus", 0).empty());
+  assert(addSlot(m, "\"type\":\"lp\",\"design\":\"lr\",\"order\":4,\"freq\":2000", "bus", 0).empty());
+
+  port.events.clear();
+  assert(setSlot(m, 0, "\"freq\":300", "bus", 0).empty());
+  assert(port.events.size() == 1 && port.events[0].type == 'b' && port.events[0].val == 0);
+
+  port.events.clear();
+  assert(setSlot(m, 1, "\"order\":8", "bus", 0).empty());
+  assert(port.events.size() == 7);
+  assert(port.events[0].type == 'g' && near(port.events[0].val, 0.0));
+  assert(port.events[1].type == 'w' && port.events[1].val >= MATRIX_RAMP_MS);
+  for (int stage = 1; stage <= 4; stage++)
+    assert(port.events[stage + 1].type == 'b' && port.events[stage + 1].idx == 0 && port.events[stage + 1].val == stage);
+  assert(port.events[6].type == 'g' && near(port.events[6].val, std::pow(10.0, -6.0 / 20)));
+
+  port.events.clear();
+  assert(!setSlot(m, 1, "\"order\":7", "bus", 0).empty());
+  assert(port.events.empty());
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["buses"][0]["gain"] == -6);
+
+  port.events.clear();
+  assert(patch(m, slotPatch("bus", 0, "\"op\":\"del\",\"i\":0").c_str()).empty());
+  assert(port.events.size() == 8);
+  assert(port.events[0].type == 'g' && near(port.events[0].val, 0.0));
+  assert(port.events[1].type == 'w');
+  for (int stage = 0; stage < 5; stage++)
+    assert(port.events[stage + 2].type == 'b' && port.events[stage + 2].val == stage);
+  assert(port.events[7].type == 'g' && near(port.events[7].val, std::pow(10.0, -6.0 / 20)));
+
+  port.events.clear();
+  assert(setSlot(m, 0, "\"type\":\"peq\"", "bus", 0).empty());
+  assert(port.events.size() == 7);
+  assert(port.events.front().type == 'g' && near(port.events.front().val, 0.0));
+  assert(port.events[1].type == 'w');
+  assert(port.events.back().type == 'g' && near(port.events.back().val, std::pow(10.0, -6.0 / 20)));
 }
 
 static void bypassOfAMultiBiquadSlotKeepsItsStages()
@@ -1076,6 +1128,7 @@ int main()
   undoRestoresSlots();
   slotCostPerTypeAndOrder();
   slotsArepackedInOrder();
+  multiBiquadEditsAreRampedAndSingleBiquadEditsStayLive();
   bypassOfAMultiBiquadSlotKeepsItsStages();
   typeCoefficientsGiveTheExpectedResponse();
   slopeChangesTheShelf();
