@@ -3,6 +3,7 @@
 #include <SPIFFS.h>
 
 #include "plugin.h"
+#include "matrix.h"
 
 tSettings Settings;
 tMatrixMeta matrixMeta;
@@ -366,7 +367,7 @@ void initUserParams( void )
     paramCrossover[ii].hp_bypass = false;
   }
 
-  if( pluginKind != "matrix" )  // a matrix Plugin's volume is global and survives a Preset switch
+  if( !isMatrixPlugin() )  // a matrix Plugin's volume is global and survives a Preset switch
     masterVolume.val = -60.0;
 
   spdifOutput.selectionLeft = 0x00000000;

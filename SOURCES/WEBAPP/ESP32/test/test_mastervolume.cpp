@@ -1,6 +1,7 @@
 // Host tests for the global master volume of matrix Plugins: the stored value
 // read at boot and the debounced decision when to store a change.
 // Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
+// Uses: ArduinoJson
 #include <cassert>
 #include <cstdio>
 #include "../aurora/mastervolume.h"

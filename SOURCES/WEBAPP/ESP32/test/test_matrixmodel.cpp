@@ -131,6 +131,21 @@ static void applyAllEmitsFullWriteSet()
   assert(muted == 8);
 }
 
+// After the DSP program upload every block is written, whatever the model held before.
+static void writeBaselineWritesTheWholeBaseline()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":2,\"mute\":false,\"route\":1}", 100).empty());
+  port.w.clear();
+  m.writeBaseline();
+  assert(port.w.size() == 4 + 32 + 1);  // as applyAll() of a fresh model
+  assertBaseline(m);
+  assert(!m.dirty());
+  m.undo();  // nothing to take back
+  assertBaseline(m);
+}
+
 static void muteAndGainWrites()
 {
   FakePort port;
@@ -2268,6 +2283,7 @@ int main()
   spdifOutSurvivesPresetRoundTrip();
   freshModelIsTheBaseline();
   applyAllEmitsFullWriteSet();
+  writeBaselineWritesTheWholeBaseline();
   muteAndGainWrites();
   busMuteWritesBusGain();
   routeChangeRampsDownSwitchesRampsUp();

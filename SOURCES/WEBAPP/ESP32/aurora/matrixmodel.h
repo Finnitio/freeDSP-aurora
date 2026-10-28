@@ -202,6 +202,10 @@ public:
   /*! Writes the whole state to the DSP: the Baseline after the DSP program is loaded. */
   void applyAll( void );
 
+  /*! Back to the Baseline and writes all of it (applyAll()), right after the DSP program
+   *  upload; no undo, nothing to Autosave. */
+  void writeBaseline( void );
+
   /*! Back to the Baseline, for a Preset slot without a (valid) file; writes the
    *  difference like loadPreset(). */
   void loadDefaults( MatrixRampSet* ramp = NULL );

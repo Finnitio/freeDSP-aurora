@@ -25,10 +25,10 @@ void matrixMasterVolumeChanged( void );
  *  DAC is still muted (in setup(), before resetDAC(false)). */
 void matrixWriteBaseline( void );
 
-/*! Loads the active preset (or the defaults if there is no file) and writes only
+/*! Loads the active Preset (or the defaults if there is no file) and writes only
  *  the difference to the DSP, inside one shared gain ramp (MatrixModel::switchPreset);
  *  no DAC mute, no legacy parameter upload. Saves unsaved changes of the previously
- *  active preset first. Runs on the I2C worker (or in setup()); the DSP writes
+ *  active Preset first. Runs on the I2C worker (or in setup()); the DSP writes
  *  happen right away. A switch calls it through applyPresetSwitch(). */
 void matrixLoadPreset( void );
 
@@ -65,7 +65,7 @@ std::string matrixState( void );
 /*! Active biquad coefficients of one Channel (ch "bus" or "out") for the plot; "" if unknown. */
 std::string matrixCoeffs( const char* ch, int idx );
 
-/*! Call from loop(): queues the auto-save of the Preset and the store of the
+/*! Call from loop(): queues the Autosave of the Preset and the store of the
  *  master volume once the changes have settled. */
 void matrixLoop( void );
 

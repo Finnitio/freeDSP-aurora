@@ -468,6 +468,14 @@ void MatrixModel::loadDefaults( MatrixRampSet* ramp )
   resetTo( ramp, false );
 }
 
+void MatrixModel::writeBaseline( void )
+{
+  reset();
+  undo_.valid = false;
+  dirty_ = false;
+  applyAll();
+}
+
 void MatrixModel::switchToDefaults( const MatrixAddOn* addOn )
 {
   resetTo( NULL, true, addOn );

@@ -10,6 +10,7 @@
 #include <ctype.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include "matrixmodel.h"  // MATRIX_SAVE_DELAY_MS
 
 #define MASTER_VOLUME_DEFAULT_DB -60.0f
 #define MASTER_VOLUME_MIN_DB -120.0f
@@ -51,7 +52,7 @@ inline float parseStoredVolume( const char* text )
  *  change (like Autosave), and only if it differs from the stored value, so
  *  turning the encoder or dragging the slider does not wear the flash.
  */
-#define MASTER_VOLUME_SAVE_DELAY_MS 2000
+#define MASTER_VOLUME_SAVE_DELAY_MS MATRIX_SAVE_DELAY_MS  // like Autosave
 
 class MasterVolumeSaver
 {

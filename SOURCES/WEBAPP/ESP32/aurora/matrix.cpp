@@ -54,7 +54,6 @@ SemaphoreHandle_t modelMutex = NULL;  // the model is used by the web task, the 
 bool keepStored = false;              // its file failed to load: never overwrite it with defaults
 MasterVolumeSaver* volumeSaver = NULL;  // under modelMutex too: changed on the worker, stored from loop()
 
-static_assert( MASTER_VOLUME_SAVE_DELAY_MS == MATRIX_SAVE_DELAY_MS, "master volume is stored like Autosave" );
 const char* const MASTER_VOLUME_FILE = "/mastervol.txt";
 
 class ModelLock
@@ -248,9 +247,8 @@ void matrixWriteBaseline( void )
   std::vector<Op> ops;
   {
     ModelLock lock;
-    model->loadDefaults();
     port.ops.clear();
-    model->applyAll();  // the DSP program was just loaded: write everything, not the difference
+    model->writeBaseline();  // the DSP program was just loaded: write everything, not the difference
     ops.swap( port.ops );
     if( Settings.addonid == ADDON_B )  // updateAddOn() wrote it before the DSP program upload
       model->setAddOn( { true, currentAddOnCfg[0], currentAddOnCfg[1], currentAddOnCfg[2] } );
@@ -278,7 +276,7 @@ void matrixLoadPreset( void )
   const MatrixAddOn addOn = readAddOnFile( currentPreset );  // not set: keep the current config
 
   std::vector<Op> ops;
-  std::string oldJson;  // changes of the previous preset that auto-save has not stored yet
+  std::string oldJson;  // changes of the previous Preset that Autosave has not stored yet
   MatrixAddOn oldAddOn;
   uint8_t oldPreset;
   {
@@ -299,7 +297,7 @@ void matrixLoadPreset( void )
       Serial.print( F("matrix: using defaults: ") );
       Serial.println( err.c_str() );
       model->switchToDefaults( &addOn );
-      keepStored = !json.empty();  // an existing file stays as it is; edits are not auto-saved
+      keepStored = !json.empty();  // an existing file stays as it is; edits are not autosaved
     }
     model->setPreset( currentPreset );
     ops.swap( port.ops );
