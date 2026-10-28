@@ -552,6 +552,47 @@ async function exportImportTests() {
   assert(/^Import failed/.test(els.msg.textContent), "an unreadable file is reported");
 }
 
+// Evaluation statistics of a Preset test: exact multinomial test against equal liking.
+function stats() {
+  const close = (a, b, msg) => assert(Math.abs(a - b) < 1e-9, msg + ": " + a + " != " + b);
+  close(context.exactP([8, 2]), 0.109375, "8:2 of 2 Presets equals the exact two-sided binomial test");
+  close(context.exactP([5, 5]), 1, "an even split of 2 Presets is fully explained by chance");
+  close(context.exactP([4, 4, 4]), 1, "even counts of 3 Presets give p = 1");
+  close(context.exactP([3, 3, 3, 3]), 1, "even counts of 4 Presets give p = 1");
+  // 5 Votes all for one of 3 Presets: only the 3 all-on-one outcomes (1/243 each) are as unlikely.
+  close(context.exactP([5, 0, 0]), 3 / 243, "5:0:0 of 3 Presets");
+  // 3 Votes on 4 Presets: all-on-one 1/64 each (4 of them); 2+1 is 3/64, 1+1+1 is 6/64, both more likely.
+  close(context.exactP([0, 3, 0, 0]), 4 / 64, "0:3:0:0 of 4 Presets");
+
+  // Votes are the indices of the chosen Presets; a Preset nobody chose still gets its row.
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(context.tally([2, 0, 2, 2], 3))),
+    { n: 4, counts: [1, 0, 3], pct: [25, 0, 75] });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(context.tally([], 2))),
+    { n: 0, counts: [0, 0], pct: [0, 0] }, "no Votes: zero shares, not NaN");
+
+  // verdict: winner = index of the single leader, -1 on a tie for first; sig only for a winner with p < 0.05.
+  const verdict = (counts, winner, p, sig, msg) => {
+    const v = context.verdict(counts);
+    assert.strictEqual(v.winner, winner, msg + ": winner");
+    if (p === null) assert.strictEqual(v.p, null, msg + ": no p-value");
+    else close(v.p, p, msg + ": p");
+    assert.strictEqual(v.sig, sig, msg + ": significance");
+  };
+  verdict([5, 5], -1, 1, false, "5:5 is a tie");
+  verdict([2, 8], 1, 0.109375, false, "8:2 leads but could be chance");
+  verdict([0, 5, 0], 1, 3 / 243, true, "5:0:0 is significant");
+  verdict([0, 9, 0, 9], -1, context.exactP([0, 9, 0, 9]), false, "a tie for first has no winner, even if p < 0.05");
+  assert(context.exactP([0, 9, 0, 9]) < 0.05, "the tie case above is one with p < 0.05");
+  verdict([2, 0], 0, null, false, "fewer than 3 Votes: no p-value");
+  verdict([0, 0], -1, null, false, "no Votes: no winner");
+
+  const t0 = Date.now();
+  const p50 = context.exactP([20, 12, 10, 8]);
+  assert(Date.now() - t0 < 100, "50 Votes on 4 Presets take well under 100 ms");
+  assert(p50 > 0 && p50 < 1, "50 Votes on 4 Presets give a p-value in range");
+}
+
+stats();
 main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
