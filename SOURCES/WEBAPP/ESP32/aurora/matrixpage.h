@@ -56,13 +56,13 @@ button:disabled{opacity:.4}
 <button id="add" class="wide" onclick="addSlot()">+ add</button>
 </div>
 <script>
-var st=null,timers={},seq=0,seen=0,late=false,view=null,cf=null,cseq=0,lv={},csig="",ct=0;
+var st=null,timers={},seq=0,seen=0,late=false,view=null,cf=null,cseq=0,lv={},csig="",ct=0,activePreset=-1;
 function say(t){document.getElementById("msg").textContent=t||"";}
 function waitIdle(){return fetch("/idle").then(function(r){return r.text();}).then(function(t){
   if(t=="1")return;return new Promise(function(r){setTimeout(r,100);}).then(waitIdle);});}
 function load(){
   var n=++seq;
-  fetch("/matrix").then(function(r){return r.json();}).then(function(s){if(n<seen)return;seen=n;st=s;draw();})
+  fetch("/matrix").then(function(r){return r.json();}).then(function(s){if(n<seen)return;seen=n;st=s;activePreset=s.preset;draw();})
    .catch(function(){say("Cannot read the matrix");});
   fetch("/preset").then(function(r){return r.json();}).then(function(p){drawPresets(p.pre);});
   fetch("/mvol").then(function(r){return r.json();}).then(function(v){showVol(v.vol);});
@@ -84,17 +84,20 @@ function drawPresets(cur){
   document.getElementById("presets").innerHTML=h;
 }
 function preset(p){
+  cancelLive();
   say("Switching preset...");
   fetch("/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pre:p})})
-   .then(waitIdle).then(function(){say("");load();});
+   .then(function(r){return r.text().then(function(t){if(!r.ok)throw new Error(t||"Preset switch failed");});})
+   .then(waitIdle).then(function(){say("");load();})
+   .catch(function(e){say(e.message);load();});
 }
 // Sends a patch, the reply is the new state or the reason it was refused.
 function send(ch,idx,f){
-  var p={ch:ch,idx:idx};for(var k in f)p[k]=f[k];
+  var p={ch:ch,idx:idx,preset:activePreset};for(var k in f)p[k]=f[k];
   var n=++seq;  // replies older than one already shown are ignored
   return fetch("/matrix",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)})
    .then(function(r){return r.text().then(function(t){
-     if(r.ok){if(n<seen)return;seen=n;st=JSON.parse(t);say("");}else{say(t);}
+     if(r.ok){if(n<seen)return;seen=n;st=JSON.parse(t);say("");}else{say(t);if(r.status==409)load();}
      draw();});});
 }
 // Sliders are sent while dragging: at once, then at most every 100 ms with the latest value.
@@ -102,6 +105,10 @@ function live(k,ch,idx,f){
   var e=lv[k]||(lv[k]={t:0,p:null});e.p=f;if(e.t)return;
   var go=function(){var p=e.p;e.p=null;if(!p){e.t=0;return;}send(ch,idx,p);e.t=setTimeout(go,100);};
   go();
+}
+function cancelLive(){
+  for(var k in lv){if(lv[k].t)clearTimeout(lv[k].t);lv[k].t=0;lv[k].p=null;}
+  lv={};
 }
 function sendGain(ch,idx,v){
   document.getElementById("gv"+ch+idx).textContent=v+" dB";

@@ -317,7 +317,7 @@ MatrixModel::MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad, int
   : port_( port ), nbus_( nbus < MATRIX_MAX_BUS ? nbus : MATRIX_MAX_BUS ),
     nout_( nout < MATRIX_MAX_OUT ? nout : MATRIX_MAX_OUT ), nbiquad_( nbiquad > 0 ? nbiquad : 0 ),
     maxDelay_( maxDelay > 0 && maxDelay < MATRIX_MAX_DELAY_SAMPLES ? maxDelay : MATRIX_MAX_DELAY_SAMPLES ),
-    spdif_( 0 ), dirty_( false ), lastChange_( 0 )
+    spdif_( 0 ), dirty_( false ), lastChange_( 0 ), presetSwitching_( false )
 {
   undo_.valid = false;
   reset();
@@ -433,6 +433,9 @@ void MatrixModel::writeChannelChanges( bool isBus, int idx, const Channel& befor
 //==============================================================================
 std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
 {
+  if( presetSwitching_ )
+    return "preset switch in progress";
+
   const char* kind = patch["ch"].as<const char*>();
   if( !kind )
     return "missing ch";

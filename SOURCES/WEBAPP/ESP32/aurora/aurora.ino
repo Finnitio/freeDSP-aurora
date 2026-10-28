@@ -645,6 +645,7 @@ void next_preset(void) {
     currentPreset = 0;
 
   update_preset();
+  matrixEndPresetSwitch();
 }
 
 void prev_preset(void) {
@@ -654,6 +655,21 @@ void prev_preset(void) {
     currentPreset--;
 
   update_preset();
+  matrixEndPresetSwitch();
+}
+
+void queue_next_preset(void) {
+  if( !matrixBeginPresetSwitch() )
+    return;
+  if( !i2cPost( []() { next_preset(); needUpdateUI = true; } ) )
+    matrixEndPresetSwitch();
+}
+
+void queue_prev_preset(void) {
+  if( !matrixBeginPresetSwitch() )
+    return;
+  if( !i2cPost( []() { prev_preset(); needUpdateUI = true; } ) )
+    matrixEndPresetSwitch();
 }
 
 void increase_volume(void) {
@@ -720,7 +736,7 @@ void loop()
     {
       myDisplay.drawSwitchingPreset();
 
-      i2cPost( []() { next_preset(); needUpdateUI = true; } );
+      queue_next_preset();
 
       lastREval = rotaryEncoder.getRotationValue();
     }
@@ -750,7 +766,7 @@ void loop()
     {
       myDisplay.drawSwitchingPreset();
 
-      i2cPost( []() { prev_preset(); needUpdateUI = true; } );
+      queue_prev_preset();
 
       lastREval = rotaryEncoder.getRotationValue();
     }
@@ -798,7 +814,7 @@ void loop()
       else if((irval == APPLE_A_REMOTE_MENU) || (irval == APPLE_B_REMOTE_MENU))
       {
         myDisplay.drawSwitchingPreset();
-        i2cPost( []() { next_preset(); needUpdateUI = true; } );
+        queue_next_preset();
       }
     }
     else
@@ -806,12 +822,12 @@ void loop()
       if((irval == APPLE_A_REMOTE_LEFT) || (irval == APPLE_B_REMOTE_LEFT))
       {
         myDisplay.drawSwitchingPreset();
-        i2cPost( []() { prev_preset(); needUpdateUI = true; } );
+        queue_prev_preset();
       }
       else if((irval == APPLE_A_REMOTE_RIGHT) || (irval == APPLE_B_REMOTE_RIGHT))
       {
         myDisplay.drawSwitchingPreset();
-        i2cPost( []() { next_preset(); needUpdateUI = true; } );
+        queue_next_preset();
       }
     }
     //else

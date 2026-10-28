@@ -18,6 +18,12 @@ void matrixInit( void );
  *  the I2C worker (or in setup()); the DSP writes happen right away. */
 void matrixLoadPreset( void );
 
+/*! Closes/reopens the live-edit gate around a preset switch. Begin must happen
+ *  before the switch is queued, so later web edits are rejected instead of
+ *  landing behind the selected preset's writes. */
+bool matrixBeginPresetSwitch( void );
+void matrixEndPresetSwitch( void );
+
 /*! Applies a patch. Returns true and the new state, or false and the reason. The
  *  DSP writes are queued for the I2C worker, so this is safe in a web handler. */
 bool matrixApply( JsonObject patch, std::string& reply );
