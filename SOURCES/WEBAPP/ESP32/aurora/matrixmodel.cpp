@@ -148,6 +148,35 @@ MatrixModel::Slot MatrixModel::choice( int n )
   return s;
 }
 
+/*! Shared final Slot rules, after either a partial edit or a complete preset Slot
+ *  has been parsed. Non-crossover design/order are compatibility input and are
+ *  normalized away; the returned field names let the live editor keep its
+ *  specific rejection reasons while preset loading keeps its single reason. */
+const char* MatrixModel::normalizeSlot( Slot& s )
+{
+  if( s.type < SLOT_PEQ || s.type > SLOT_PHASE )
+    return "type";
+  if( s.type == SLOT_HP || s.type == SLOT_LP )
+  {
+    if( !orderValid( s.lr, s.order ) )
+      return "order";
+  }
+  else
+  {
+    s.lr = false;
+    s.order = 1;
+  }
+  if( !( s.freq >= kFreqMin && s.freq <= kFreqMax ) )
+    return "freq";
+  if( !( s.q >= kQMin && s.q <= kQMax ) )
+    return "q";
+  if( !( s.gain >= kPeqGainMin && s.gain <= kPeqGainMax ) )
+    return "gain";
+  if( !( s.slope >= kSlopeMin && s.slope <= kSlopeMax ) )
+    return "slope";
+  return NULL;
+}
+
 int MatrixModel::used( const Channel& c )
 {
   int n = 0;
@@ -248,19 +277,15 @@ std::string MatrixModel::applySlot( JsonObject op, Channel& c ) const
     c.slots.erase( c.slots.begin() + at );  // the following Slots close the gap
     return "";
   }
-  const struct { const char* key; float lo, hi; float* v; } nums[] = {
-    { "freq", kFreqMin, kFreqMax, &s.freq }, { "q", kQMin, kQMax, &s.q }, { "gain", kPeqGainMin, kPeqGainMax, &s.gain },
-    { "slope", kSlopeMin, kSlopeMax, &s.slope } };
+  const struct { const char* key; float* v; } nums[] = {
+    { "freq", &s.freq }, { "q", &s.q }, { "gain", &s.gain }, { "slope", &s.slope } };
   for( size_t k = 0; k < 4; k++ )
   {
     if( !op.containsKey( nums[k].key ) )
       continue;
     if( !op[nums[k].key].is<float>() )
       return std::string( nums[k].key ) + " must be a number";
-    const float v = op[nums[k].key].as<float>();
-    if( !( v >= nums[k].lo && v <= nums[k].hi ) )
-      return std::string( nums[k].key ) + " out of range";
-    *nums[k].v = v;
+    *nums[k].v = op[nums[k].key].as<float>();
   }
   if( op.containsKey( "bypass" ) )
   {
@@ -293,15 +318,12 @@ std::string MatrixModel::applySlot( JsonObject op, Channel& c ) const
       return "order must be a number";
     s.order = op["order"].as<int>();
   }
-  if( s.type == SLOT_HP || s.type == SLOT_LP )
+  const char* invalid = normalizeSlot( s );
+  if( invalid )
   {
-    if( !orderValid( s.lr, s.order ) )
+    if( strcmp( invalid, "order" ) == 0 )
       return s.lr ? "Linkwitz-Riley order must be 2, 4 or 8" : "Butterworth order must be 1 to 8";
-  }
-  else
-  {
-    s.lr = false;  // design and order only exist for HP and LP; never store them elsewhere
-    s.order = 1;
+    return std::string( invalid ) + " out of range";
   }
   if( used( c ) - ( add ? 0 : cost( c.slots[at] ) ) + cost( s ) > nbiquad_ )
     return add ? "no biquads left" : "not enough biquads left";
@@ -824,15 +846,7 @@ std::string MatrixModel::readChannel( JsonObject o, bool isBus, Channel& c ) con
         return "bad slot";
       sl.slope = s["slope"].as<float>();
     }
-    if( sl.type != SLOT_HP && sl.type != SLOT_LP )
-    {
-      sl.lr = false;  // design and order only exist for HP and LP
-      sl.order = 1;
-    }
-    if( !( sl.freq >= kFreqMin && sl.freq <= kFreqMax && sl.q >= kQMin && sl.q <= kQMax
-           && sl.gain >= kPeqGainMin && sl.gain <= kPeqGainMax && sl.slope >= kSlopeMin && sl.slope <= kSlopeMax ) )
-      return "bad slot";
-    if( ( sl.type == SLOT_HP || sl.type == SLOT_LP ) && !orderValid( sl.lr, sl.order ) )
+    if( normalizeSlot( sl ) )
       return "bad slot";
     c.slots.push_back( sl );
   }
