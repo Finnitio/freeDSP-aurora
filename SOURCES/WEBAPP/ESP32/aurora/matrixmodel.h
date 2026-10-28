@@ -55,8 +55,21 @@ enum MatrixEditStatus
 {
   MATRIX_EDIT_OK,
   MATRIX_EDIT_BAD_REQUEST,  // the patch itself is invalid
-  MATRIX_EDIT_CONFLICT      // a Preset switch is in progress or the patch was made against another Preset
+  MATRIX_EDIT_CONFLICT,     // a Preset switch is in progress or the patch was made against another Preset
+  MATRIX_EDIT_BUSY          // the worker queue is full; the patch was undone and may be sent again
 };
+
+/*! HTTP status of the /matrix reply; 503 for busy, as /preset answers a full worker queue. */
+inline int matrixEditHttpStatus( MatrixEditStatus status )
+{
+  switch( status )
+  {
+    case MATRIX_EDIT_OK:       return 200;
+    case MATRIX_EDIT_CONFLICT: return 409;
+    case MATRIX_EDIT_BUSY:     return 503;
+    default:                   return 400;
+  }
+}
 
 /*! Outcome of a live edit; reason is "" when accepted, else the text for the user. */
 struct MatrixEditResult

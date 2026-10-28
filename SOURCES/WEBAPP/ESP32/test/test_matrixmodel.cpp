@@ -1619,6 +1619,15 @@ static void editResultsDistinguishSuccessBadRequestAndConflict()
   assert(m.beginPresetSwitch());
 }
 
+// The /matrix reply: a full worker queue is "try again" (503, as for /preset), not a bad patch.
+static void editStatusesMapToDistinctHttpReplies()
+{
+  assert(matrixEditHttpStatus(MATRIX_EDIT_OK) == 200);
+  assert(matrixEditHttpStatus(MATRIX_EDIT_BAD_REQUEST) == 400);
+  assert(matrixEditHttpStatus(MATRIX_EDIT_CONFLICT) == 409);
+  assert(matrixEditHttpStatus(MATRIX_EDIT_BUSY) == 503);
+}
+
 static void stateCarriesTheActivePreset()
 {
   FakePort port;
@@ -1632,6 +1641,7 @@ static void stateCarriesTheActivePreset()
 int main()
 {
   editResultsDistinguishSuccessBadRequestAndConflict();
+  editStatusesMapToDistinctHttpReplies();
   stateCarriesTheActivePreset();
   linkMembershipHasSeparateBusAndOutputScopes();
   linkedAspectsPropagateAndJoiningCopiesAbsoluteValues();

@@ -218,7 +218,7 @@ MatrixEditResult matrixApply( JsonObject patch, std::string& state )
   if( !ops.empty() && !i2cPost( [ops]() { execOps( ops ); } ) )
   {
     model->undo();
-    return { MATRIX_EDIT_BAD_REQUEST, "busy" };  // 400 as before; the page shows the reason
+    return { MATRIX_EDIT_BUSY, "busy" };
   }
   state = model->stateJson();  // under the same lock: the reply shows exactly this edit
   return result;

@@ -314,6 +314,17 @@ async function commitTests() {
   assert.strictEqual(f2.value, "1200");
   assert.strictEqual(els.msg.textContent, "freq must be a number");
 
+  // A full worker queue (503) is shown like a rejected value: the field reverts.
+  reply = () => ({ ok: false, status: 503, text: "busy" });
+  const f3 = input("s0freq");
+  type(f3, "800");
+  key(f3, "Enter");
+  assert.strictEqual(posts.pop().body.slot.freq, 800);
+  await flush();
+  assert.strictEqual(f3.value, "1200", "a busy reply reverts the field");
+  assert.strictEqual(els.msg.textContent, "busy");
+  assert.strictEqual(posts.length, 0, "a busy reply does not reload the state");
+
   // Channel gain and delay on the filter page.
   reply = accept;
   focus(null);

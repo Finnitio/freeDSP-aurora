@@ -1887,7 +1887,7 @@ void setupWebserver (void)
       if( edit.ok() )
         request->send( 200, "application/json", state.c_str() );
       else
-        request->send( edit.status == MATRIX_EDIT_CONFLICT ? 409 : 400, "text/plain", edit.reason.c_str() );
+        request->send( matrixEditHttpStatus( edit.status ), "text/plain", edit.reason.c_str() );
     });
   }
   else if( SPIFFS.exists( "/dsp.html" ) )
