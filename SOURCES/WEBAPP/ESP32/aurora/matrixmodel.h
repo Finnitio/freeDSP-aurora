@@ -158,6 +158,13 @@ public:
   std::string switchPreset( const std::string& json );
   void switchToDefaults( void );
 
+  /*! Import of an exported Preset file into the active Preset: writes like switchPreset()
+   *  and marks the model changed at nowMs, so Autosave stores it. preset is the Preset
+   *  the import was made against; another one, or a Preset switch in progress, is a
+   *  conflict. A rejected import changes and writes nothing; undo() takes an accepted
+   *  one back (model only). */
+  MatrixEditResult importPreset( const std::string& json, int preset, uint32_t nowMs );
+
   /*! Writes the whole state to the DSP: the Baseline after the DSP program is loaded. */
   void applyAll( void );
 

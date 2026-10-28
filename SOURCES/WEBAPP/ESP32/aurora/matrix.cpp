@@ -276,6 +276,34 @@ MatrixEditResult matrixApply( JsonObject patch, std::string& state )
   return result;
 }
 
+MatrixEditResult matrixImport( const std::string& json, int preset )
+{
+  if( !model )
+    return { MATRIX_EDIT_BAD_REQUEST, "not a matrix plugin" };
+  ModelLock lock;  // as matrixApply(): the post stays under the lock
+  port.ops.clear();
+  MatrixEditResult result = model->importPreset( json, preset, millis() );
+  if( !result.ok() )
+    return result;
+  std::vector<Op> ops;
+  ops.swap( port.ops );
+  if( !ops.empty() && !i2cPost( [ops]() { execOps( ops ); } ) )
+  {
+    model->undo();
+    return { MATRIX_EDIT_BUSY, "busy" };
+  }
+  keepStored = false;  // the active Preset is valid now: Autosave may overwrite its file
+  return result;
+}
+
+std::string matrixPresetJson( void )
+{
+  if( !model )
+    return "";
+  ModelLock lock;
+  return model->savePreset();
+}
+
 std::string matrixState( void )
 {
   if( !model )

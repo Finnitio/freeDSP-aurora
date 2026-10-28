@@ -44,6 +44,15 @@ void matrixEndPresetSwitch( void );
  *  web handler. */
 MatrixEditResult matrixApply( JsonObject patch, std::string& state );
 
+/*! Import of an exported Preset file (Export's inverse) into the active Preset, made
+ *  against Preset `preset`: the difference inside the shared ramp, then Autosave
+ *  (MatrixModel::importPreset). Accepted, bad request or conflict like matrixApply();
+ *  the DSP writes are queued for the I2C worker, so this is safe in a web handler. */
+MatrixEditResult matrixImport( const std::string& json, int preset );
+
+/*! Export: the active Preset as a Preset file, including changes Autosave has not stored yet. */
+std::string matrixPresetJson( void );
+
 std::string matrixState( void );
 
 /*! Active biquad coefficients of one Channel (ch "bus" or "out") for the plot; "" if unknown. */

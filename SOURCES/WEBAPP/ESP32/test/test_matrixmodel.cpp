@@ -1947,6 +1947,77 @@ static void switchToDefaultsTakesTheSharedRamp()
   assert(port.log.empty());
 }
 
+// Import (Export's inverse): a Preset file replaces the active Preset through the
+// Preset-switch path (difference inside the shared ramp) and is then Autosaved.
+static void importReplacesTheActivePresetThroughTheSharedRampAndIsAutosaved()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  m.setPreset(1);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"mute\":false}", 100).empty());
+  m.markSaved();
+  const std::string file = presetWith(m, 2, "{\"ch\":\"out\",\"idx\":1,\"gain\":-6,\"slot\":{\"op\":\"add\",\"freq\":1000,\"gain\":6}}");
+  port.log.clear();
+  const MatrixEditResult r = m.importPreset(file, 1, 5000);
+  assert(r.ok() && r.reason.empty());
+  char wait[16];
+  snprintf(wait, sizeof(wait), "w %d", MATRIX_RAMP_MS);
+  assert(port.log == lines({ "g out 1 0.0000", wait, "b out 1 0", "g out 1 0.5012" }));
+  assert(m.savePreset() == file);
+  assert(m.preset() == 1);
+  // marked dirty: Autosave stores it once it has settled
+  assert(m.dirty());
+  assert(!m.saveDue(6999));
+  assert(m.saveDue(7000));
+}
+
+static void invalidImportIsRejectedWithoutChangingState()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  m.setPreset(0);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":3,\"mute\":false,\"route\":2}", 100).empty());
+  m.markSaved();
+  const std::string before = m.savePreset();
+  port.log.clear();
+  const char* bad[] = { "not json", "{\"v\":1,\"buses\":[],\"outs\":[]}", "{\"v\":99}", "" };
+  for (const char* json : bad)
+  {
+    const MatrixEditResult r = m.importPreset(json, 0, 5000);
+    assert(r.status == MATRIX_EDIT_BAD_REQUEST && !r.reason.empty());
+  }
+  assert(port.log.empty() && m.savePreset() == before && !m.dirty());
+}
+
+static void importDuringASwitchOrForAnotherPresetIsAConflict()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  m.setPreset(2);
+  const std::string file = presetWith(m, 2, "{\"ch\":\"out\",\"idx\":0,\"mute\":false}");
+  const std::string before = m.savePreset();
+  port.log.clear();
+  assert(m.importPreset(file, 1, 0).status == MATRIX_EDIT_CONFLICT);  // made against Preset B
+  assert(m.beginPresetSwitch());
+  assert(m.importPreset(file, 2, 0).status == MATRIX_EDIT_CONFLICT);
+  m.endPresetSwitch();
+  assert(port.log.empty() && m.savePreset() == before && !m.dirty());
+}
+
+// When its writes cannot be queued, the firmware takes the import back (model only).
+static void undoRevertsAnImport()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"mute\":false}", 100).empty());  // not yet autosaved
+  const std::string before = m.savePreset();
+  const std::string file = presetWith(m, 2, "{\"ch\":\"out\",\"idx\":0,\"gain\":-3}");
+  assert(m.importPreset(file, 0, 5000).ok());
+  m.undo();
+  assert(m.savePreset() == before);
+  assert(m.dirty() && m.saveDue(2100) && !m.saveDue(2099));  // the earlier edit still waits for Autosave
+}
+
 int main()
 {
   editResultsDistinguishSuccessBadRequestAndConflict();
@@ -2028,6 +2099,10 @@ int main()
   presetSwitchRampsOnlyAudibleChannels();
   failedPresetSwitchWritesNothing();
   switchToDefaultsTakesTheSharedRamp();
+  importReplacesTheActivePresetThroughTheSharedRampAndIsAutosaved();
+  invalidImportIsRejectedWithoutChangingState();
+  importDuringASwitchOrForAnotherPresetIsAConflict();
+  undoRevertsAnImport();
   printf("all tests passed\n");
   return 0;
 }

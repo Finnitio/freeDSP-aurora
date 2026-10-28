@@ -1206,6 +1206,25 @@ std::string MatrixModel::switchPreset( const std::string& json )
   return load( json, NULL, true );
 }
 
+MatrixEditResult MatrixModel::importPreset( const std::string& json, int preset, uint32_t nowMs )
+{
+  if( preset != preset_ )
+    return { MATRIX_EDIT_CONFLICT, "preset changed; refresh the matrix" };
+  if( presetSwitching_ )
+    return { MATRIX_EDIT_CONFLICT, "preset switch in progress" };
+  saveUndo();
+  std::string reason = json.empty() ? "empty preset file" : switchPreset( json );
+  if( !reason.empty() )
+  {
+    undo_.valid = false;  // nothing changed, so there is nothing to take back
+    return { MATRIX_EDIT_BAD_REQUEST, reason };
+  }
+  undo_.valid = true;  // load() dropped it; the snapshot from before the import still holds
+  dirty_ = true;
+  lastChange_ = nowMs;
+  return { MATRIX_EDIT_OK, "" };
+}
+
 std::string MatrixModel::load( const std::string& json, MatrixRampSet* ramp, bool shared )
 {
   // a smaller document usually fits; the 4x one only when that ran out of memory

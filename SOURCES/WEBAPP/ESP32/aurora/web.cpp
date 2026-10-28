@@ -39,6 +39,8 @@ extern const char* apPasswordError;
 extern String sourceNames[kNumSourceNames];
 
 static const size_t BODY_MAX_SIZE = 4096;
+// A matrix Preset file with MAX_MATRIX_BIQUAD PEQs on all ten Channels is about 30 KB.
+static const size_t PRESET_FILE_MAX_SIZE = 32768;
 
 AsyncWebServer server( 80 );
 uint8_t currentFirUploadIdx = 0;
@@ -1922,6 +1924,32 @@ void setupWebserver (void)
       else
         request->send( matrixEditHttpStatus( edit.status ), "text/plain", edit.reason.c_str() );
     });
+    // Import of a Preset file into the active Preset (?preset=n: the Preset it was made against).
+    server.on( "/matrix/import", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
+    {
+      char* body = (char*)request->_tempObject;  // freed by the request
+      const bool hadBody = ( body != NULL );
+      BodyResult res = bodyChunk( body, data, len, index, total, PRESET_FILE_MAX_SIZE );
+      request->_tempObject = body;
+      if( res == BODY_REJECTED )
+      {
+        if( index == 0 || hadBody )  // answer once
+          request->send( 413, "text/plain", "Bad or too large preset file" );
+        return;
+      }
+      if( res != BODY_COMPLETE )
+        return;
+      if( !request->hasParam( "preset" ) )
+      {
+        request->send( 400, "text/plain", "missing preset" );
+        return;
+      }
+      const MatrixEditResult edit = matrixImport( std::string( body, total ), request->getParam( "preset" )->value().toInt() );
+      if( edit.ok() )
+        request->send( 200, "application/json", matrixState().c_str() );
+      else
+        request->send( matrixEditHttpStatus( edit.status ), "text/plain", edit.reason.c_str() );
+    });
   }
   else if( SPIFFS.exists( "/dsp.html" ) )
     server.on( "/",          HTTP_GET, [](AsyncWebServerRequest *request ) { request->send( SPIFFS, "/dsp.html", "text/html" ); });
@@ -1971,6 +1999,13 @@ void setupWebserver (void)
   server.on( "/preset.param", HTTP_GET, [](AsyncWebServerRequest *request )
   {
     Serial.println( "/preset.param" );
+    if( isMatrixPlugin() )  // Export: the live Preset, with changes Autosave has not stored yet
+    {
+      AsyncWebServerResponse* response = request->beginResponse( 200, "application/json", matrixPresetJson().c_str() );
+      response->addHeader( "Content-Disposition", "attachment; filename=\"preset-" + String( (char)( 'A' + currentPreset ) ) + ".json\"" );
+      request->send( response );
+      return;
+    }
     request->send( SPIFFS, presetUsrparamFile[currentPreset], "application/octet-stream" );
   });
   server.on( "/spdifout",     HTTP_GET, [](AsyncWebServerRequest *request ) { handleGetSpdifOutJson(request); });
