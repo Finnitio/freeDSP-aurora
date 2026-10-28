@@ -28,10 +28,24 @@ cat aurora.js | gzip > aurora.jgz
 cd ../../..
 
 echo "Deploying plugins"
+PLUGIN_VERSION=v2.2.2
 cd SOURCES/sigma2aurora
-python sigma2aurora.py ../SIGMASTUDIO/8channels/8channels.xml 8channels --version v2.2.2 --gui ../WEBAPP/plugins/8channels/dsp.html --outputdir plugins
-python sigma2aurora.py ../SIGMASTUDIO/HomeCinema71/HomeCinema71.xml HomeCinema71 --version v2.2.2 --gui ../WEBAPP/plugins/HomeCinema71/dsp.html --outputdir plugins
-python sigma2aurora.py ../SIGMASTUDIO/4FIRs/4FIRs.xml 4FIRs --version v2.2.2 --gui ../WEBAPP/plugins/4FIRs/dsp.html --outputdir plugins
+# convert <project> [gui]: stop the release if the converter fails
+convert() {
+  local gui=()
+  if [ -n "$2" ]; then
+    gui=(--gui "$2")
+  fi
+  if ! python sigma2aurora.py ../SIGMASTUDIO/$1/$1.xml $1 --version $PLUGIN_VERSION "${gui[@]}" --outputdir plugins; then
+    echo "Converting plugin $1 failed" >&2
+    exit 1
+  fi
+}
+convert 8channels ../WEBAPP/plugins/8channels/dsp.html
+convert HomeCinema71 ../WEBAPP/plugins/homecinema71/dsp.html
+convert 4FIRs ../WEBAPP/plugins/4FIRs/dsp.html
+# The matrix page is built into the firmware, so matrix has no --gui
+convert matrix
 
 cd ../..
 

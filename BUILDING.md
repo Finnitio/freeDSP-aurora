@@ -9,3 +9,10 @@ But if you want to assist with development by contributing code, you will find t
 
 Please note that a complete Aurora Plugin consists of a DSP firmware image, an associated control website and some meta-data.
 The actual XMOS and ESP32 firmware are not modified by plugins.
+
+## Release build
+
+`./makefullrelease.sh <version>` collects a release into the folder `<version>`: the ESP32 firmware (build `SOURCES/WEBAPP/ESP32/aurora/aurora.ino.esp32.bin` first), the updater, the user manuals and the plugins.
+It converts each SigmaStudio project in `SOURCES/SIGMASTUDIO` with `sigma2aurora` into `<version>/plugins`: 8channels, HomeCinema71, 4FIRs and matrix, all with the same plugin version.
+The matrix plugin has no generated `dsp.html`, because its page is part of the ESP32 firmware.
+The script stops with an error if any plugin conversion fails.
