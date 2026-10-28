@@ -388,7 +388,7 @@ MatrixModel::MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad, int
   : port_( port ), nbus_( nbus < MATRIX_MAX_BUS ? nbus : MATRIX_MAX_BUS ),
     nout_( nout < MATRIX_MAX_OUT ? nout : MATRIX_MAX_OUT ), nbiquad_( nbiquad > 0 ? nbiquad : 0 ),
     maxDelay_( maxDelay > 0 && maxDelay < MATRIX_MAX_DELAY_SAMPLES ? maxDelay : MATRIX_MAX_DELAY_SAMPLES ),
-    spdif_( 0 ), dirty_( false ), lastChange_( 0 ), presetSwitching_( false )
+    spdif_( 0 ), dirty_( false ), lastChange_( 0 ), presetSwitching_( false ), preset_( 0 )
 {
   undo_.valid = false;
   reset();
@@ -518,11 +518,30 @@ void MatrixModel::snapshot( Snapshot& s ) const
   for( int o = 0; o < nout_; o++ ) s.out[o] = out_[o];
 }
 //==============================================================================
-std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
+bool MatrixModel::beginPresetSwitch( void )
 {
   if( presetSwitching_ )
-    return "preset switch in progress";
+    return false;
+  presetSwitching_ = true;
+  return true;
+}
 
+MatrixEditResult MatrixModel::apply( JsonObject patch, uint32_t nowMs )
+{
+  if( patch.containsKey( "preset" ) )
+  {
+    if( !patch["preset"].is<int>() || patch["preset"].as<int>() != preset_ )
+      return { MATRIX_EDIT_CONFLICT, "preset changed; refresh the matrix" };
+    patch.remove( "preset" );
+  }
+  if( presetSwitching_ )
+    return { MATRIX_EDIT_CONFLICT, "preset switch in progress" };
+  std::string reason = applyPatch( patch, nowMs );
+  return { reason.empty() ? MATRIX_EDIT_OK : MATRIX_EDIT_BAD_REQUEST, reason };
+}
+
+std::string MatrixModel::applyPatch( JsonObject patch, uint32_t nowMs )
+{
   const char* kind = patch["ch"].as<const char*>();
   if( !kind )
     return "missing ch";
@@ -892,6 +911,7 @@ static std::string toString( const JsonDocument& doc )
 std::string MatrixModel::stateJson( void ) const
 {
   DynamicJsonDocument doc( 20480 + 288 * slotCount() );
+  doc["preset"] = preset_;
   doc["nbus"] = nbus_;
   doc["nout"] = nout_;
   doc["nbiquad"] = nbiquad_;

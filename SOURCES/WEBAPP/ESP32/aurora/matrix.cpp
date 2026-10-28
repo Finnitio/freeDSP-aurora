@@ -47,9 +47,7 @@ public:
 RecordPort port;
 MatrixModel* model = NULL;
 SemaphoreHandle_t modelMutex = NULL;  // the model is used by the web task, the worker and loop()
-uint8_t loadedPreset = 0;             // preset the model state belongs to
 bool keepStored = false;              // its file failed to load: never overwrite it with defaults
-bool presetSwitching = false;          // protected by modelMutex
 
 class ModelLock
 {
@@ -125,18 +123,6 @@ void writePresetFile( uint8_t preset, const std::string& json )
   f.write( (const uint8_t*)json.data(), json.size() );
   f.close();
 }
-
-std::string stateWithPreset( void )
-{
-  std::string state = model->stateJson();
-  if( !state.empty() && state[state.size() - 1] == '}' )
-  {
-    char field[24];
-    snprintf( field, sizeof( field ), ",\"preset\":%u}", (unsigned)loadedPreset );
-    state.replace( state.size() - 1, 1, field );
-  }
-  return state;
-}
 }  // namespace
 
 bool isMatrixPlugin( void )
@@ -150,7 +136,6 @@ void matrixInit( void )
     return;
   modelMutex = xSemaphoreCreateMutex();
   model = new MatrixModel( port, matrixMeta.nbus, matrixMeta.nout, matrixMeta.nbiquad, matrixMeta.maxdly );
-  presetSwitching = false;
 }
 
 bool matrixBeginPresetSwitch( void )
@@ -158,11 +143,7 @@ bool matrixBeginPresetSwitch( void )
   if( !model )
     return true;
   ModelLock lock;
-  if( presetSwitching )
-    return false;
-  presetSwitching = true;
-  model->beginPresetSwitch();
-  return true;
+  return model->beginPresetSwitch();
 }
 
 void matrixEndPresetSwitch( void )
@@ -171,7 +152,6 @@ void matrixEndPresetSwitch( void )
     return;
   ModelLock lock;
   model->endPresetSwitch();
-  presetSwitching = false;
 }
 
 std::string matrixCoeffs( const char* ch, int idx )
@@ -201,7 +181,7 @@ void matrixLoadPreset( void )
   uint8_t oldPreset;
   {
     ModelLock lock;
-    oldPreset = loadedPreset;
+    oldPreset = model->preset();
     if( model->dirty() && !keepStored )
       oldJson = model->savePreset();
     port.ops.clear();
@@ -214,7 +194,7 @@ void matrixLoadPreset( void )
       model->loadDefaults();
       keepStored = !json.empty();  // an existing file stays as it is; edits are not auto-saved
     }
-    loadedPreset = currentPreset;
+    model->setPreset( currentPreset );
     ops.swap( port.ops );
   }
   if( !oldJson.empty() )
@@ -222,39 +202,26 @@ void matrixLoadPreset( void )
   execOps( ops );
 }
 
-bool matrixApply( JsonObject patch, std::string& reply )
+MatrixEditResult matrixApply( JsonObject patch, std::string& state )
 {
   if( !model )
-  {
-    reply = "not a matrix plugin";
-    return false;
-  }
+    return { MATRIX_EDIT_BAD_REQUEST, "not a matrix plugin" };
   // i2cPost() does not block, so the post stays under the lock: a refused post is undone
   // before anyone else sees the model, and posts keep the order of the model changes.
   ModelLock lock;
-  if( patch.containsKey( "preset" ) )
-  {
-    if( !patch["preset"].is<int>() || patch["preset"].as<int>() != loadedPreset )
-    {
-      reply = "preset changed; refresh the matrix";
-      return false;
-    }
-    patch.remove( "preset" );
-  }
   port.ops.clear();
-  reply = model->apply( patch, millis() );
-  if( !reply.empty() )
-    return false;
+  MatrixEditResult result = model->apply( patch, millis() );
+  if( !result.ok() )
+    return result;
   std::vector<Op> ops;
   ops.swap( port.ops );
   if( !ops.empty() && !i2cPost( [ops]() { execOps( ops ); } ) )
   {
     model->undo();
-    reply = "busy";
-    return false;
+    return { MATRIX_EDIT_BAD_REQUEST, "busy" };  // 400 as before; the page shows the reason
   }
-  reply = stateWithPreset();
-  return true;
+  state = model->stateJson();  // under the same lock: the reply shows exactly this edit
+  return result;
 }
 
 std::string matrixState( void )
@@ -262,7 +229,7 @@ std::string matrixState( void )
   if( !model )
     return "{}";
   ModelLock lock;
-  return stateWithPreset();
+  return model->stateJson();
 }
 
 void matrixLoop( void )
@@ -273,7 +240,7 @@ void matrixLoop( void )
   if( keepStored || !model->saveDue( millis() ) )
     return;
   std::string json = model->savePreset();
-  uint8_t preset = loadedPreset;
+  int preset = model->preset();
   // only a queued save counts as saved; otherwise it is retried on the next call
   if( i2cPost( [json, preset]() { writePresetFile( preset, json ); } ) )
     model->markSaved();

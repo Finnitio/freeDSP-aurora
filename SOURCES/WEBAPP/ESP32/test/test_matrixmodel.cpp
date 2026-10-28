@@ -52,6 +52,13 @@ static std::string patch(MatrixModel& m, const char* json, uint32_t now = 0)
 {
   DynamicJsonDocument doc(512);
   assert(!deserializeJson(doc, json));
+  return m.apply(doc.as<JsonObject>(), now).reason;
+}
+
+static MatrixEditResult edit(MatrixModel& m, const char* json, uint32_t now = 0)
+{
+  DynamicJsonDocument doc(512);
+  assert(!deserializeJson(doc, json));
   return m.apply(doc.as<JsonObject>(), now);
 }
 
@@ -1453,8 +1460,53 @@ static void linkGroupsRoundTripAndUndoTogether()
   assert(b.savePreset() == before);
 }
 
+static void editResultsDistinguishSuccessBadRequestAndConflict()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  m.setPreset(2);
+
+  MatrixEditResult r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":-3}");
+  assert(r.status == MATRIX_EDIT_OK && r.reason.empty());
+  r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":-3,\"preset\":2}");
+  assert(r.status == MATRIX_EDIT_OK);
+
+  r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":99}");
+  assert(r.status == MATRIX_EDIT_BAD_REQUEST && !r.reason.empty());
+
+  // An edit made against another preset is a conflict, whatever else it carries.
+  port.w.clear();
+  r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":-6,\"preset\":1}");
+  assert(r.status == MATRIX_EDIT_CONFLICT && r.reason == "preset changed; refresh the matrix");
+  r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":99,\"preset\":\"2\"}");
+  assert(r.status == MATRIX_EDIT_CONFLICT && r.reason == "preset changed; refresh the matrix");
+  assert(port.w.empty());
+
+  // During a preset switch every edit is a conflict, and a second switch cannot start.
+  assert(m.beginPresetSwitch());
+  assert(!m.beginPresetSwitch());
+  r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":99}");
+  assert(r.status == MATRIX_EDIT_CONFLICT && r.reason == "preset switch in progress");
+  assert(port.w.empty());
+  m.endPresetSwitch();
+  assert(edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":-6}").status == MATRIX_EDIT_OK);
+  assert(m.beginPresetSwitch());
+}
+
+static void stateCarriesTheActivePreset()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  assert(stateOf(m)["preset"] == 0);
+  m.setPreset(3);
+  assert(stateOf(m)["preset"] == 3);
+  assert(stateOf(m)["nout"] == 8);
+}
+
 int main()
 {
+  editResultsDistinguishSuccessBadRequestAndConflict();
+  stateCarriesTheActivePreset();
   linkMembershipHasSeparateBusAndOutputScopes();
   linkedAspectsPropagateAndJoiningCopiesAbsoluteValues();
   joiningRejectsLinkedSettingsInTheSamePatch();

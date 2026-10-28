@@ -1874,10 +1874,12 @@ void setupWebserver (void)
       std::shared_ptr<DynamicJsonDocument> doc = readJsonBody( request, data, len, index, total, 1024 );
       if( !doc )
         return;
-      std::string reply;
-      bool ok = matrixApply( doc->as<JsonObject>(), reply );
-      const bool conflict = !ok && ( reply == "preset switch in progress" || reply == "preset changed; refresh the matrix" );
-      request->send( ok ? 200 : conflict ? 409 : 400, ok ? "application/json" : "text/plain", reply.c_str() );
+      std::string state;
+      const MatrixEditResult edit = matrixApply( doc->as<JsonObject>(), state );
+      if( edit.ok() )
+        request->send( 200, "application/json", state.c_str() );
+      else
+        request->send( edit.status == MATRIX_EDIT_CONFLICT ? 409 : 400, "text/plain", edit.reason.c_str() );
     });
   }
   else if( SPIFFS.exists( "/dsp.html" ) )
