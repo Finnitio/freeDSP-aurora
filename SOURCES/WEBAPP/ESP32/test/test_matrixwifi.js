@@ -212,6 +212,17 @@ async function joinsWifiAndKeepsTheAp() {
   assert.strictEqual(q.elements.smsg.textContent, "Not stored: WiFi name can have at most 32 characters");
 }
 
+// The page has its own "Forget network" button, so "Join network" refuses an empty name
+// (the settings UI has one button only and forgets the network on an empty name).
+async function joinRefusesEmptyName() {
+  const p = run(page, {});
+  Object.assign(p.context.document.getElementById("pwd"), { value: "secret123" });
+  await p.context.joinWifi();
+  assert.strictEqual(p.elements.smsg.textContent,
+    "Please enter the name of the network to join. To stop using a network, use \"Forget network\".");
+  assert.strictEqual(p.requests.length, 0, "nothing is sent");
+}
+
 async function forgetsWifiAndKeepsTheAp() {
   const p = run(page, {});
   Object.assign(p.context.document.getElementById("ssid"), { value: "home" });
@@ -356,6 +367,7 @@ async function main() {
   await closes();
   await rejectsInvalidWifiWithSettingsMessages();
   await joinsWifiAndKeepsTheAp();
+  await joinRefusesEmptyName();
   await forgetsWifiAndKeepsTheAp();
   await showsStoredNetworkAndConnection();
   await refreshesConnectionWhileOpen();

@@ -403,8 +403,8 @@ function wifiCheck(d){
 }
 function joinWifi(){
   var d={ssid:wifiEl("ssid").value,pwd:wifiEl("pwd").value};
-  if(!d.ssid)d.pwd="";
-  var e=wifiCheck(d);
+  // unlike the settings UI, an empty name does not forget the network here: that has its own button
+  var e=d.ssid?wifiCheck(d):"Please enter the name of the network to join. To stop using a network, use \"Forget network\".";
   if(e){ssay(e);return Promise.resolve();}
   return postWifi(d,"Stored. The DSP now joins \""+d.ssid+"\". Once connected, it is reachable in that network on the IP shown above; the access point "
    +(wifiEl("apoff").checked?"then switches off after 30 s.":"stays available."));
