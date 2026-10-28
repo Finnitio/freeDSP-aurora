@@ -35,6 +35,7 @@ struct FakePort : MatrixPort
   void writeDelay(int out, int samples) override { w.push_back({ 'd', MATRIX_OUT, out, (double)samples }); }
   void waitMs(int ms) override { record('w', MATRIX_OUT, 0, (double)ms); }
   void writeSpdifOut(uint32_t left, uint32_t right) override { w.push_back({ 'o', MATRIX_OUT, (int)right, (double)left }); }
+  void writeAddOn(const MatrixAddOn& cfg) override { w.push_back({ 'a', MATRIX_OUT, 0, (double)cfg.data }); }
   struct Bq
   {
     MatrixChannelKind kind;
@@ -1836,6 +1837,7 @@ struct OrderPort : MatrixPort
   void waitMs(int ms) override { add("w %d", ms); }
   void writeSpdifOut(uint32_t left, uint32_t right) override { add("o %u %u", (unsigned)left, (unsigned)right); }
   void writeBiquad(MatrixChannelKind kind, int idx, int stage, const float*, const float*) override { add("b %s %d %d", k(kind), idx, stage); }
+  void writeAddOn(const MatrixAddOn& cfg) override { add("a %02x %02x %02x", cfg.addr, cfg.reg, cfg.data); }
 };
 
 static std::vector<std::string> lines(std::initializer_list<const char*> l)
@@ -1947,6 +1949,68 @@ static void switchToDefaultsTakesTheSharedRamp()
   assert(port.log.empty());
 }
 
+// Ticket 04: the Add-on B config (SPDIF mux) is per Preset and diffed on a switch.
+
+static const MatrixAddOn kMuxSpdif1 = { true, 0x40, 0x01, 0x01 };
+static const MatrixAddOn kMuxSpdif2 = { true, 0x40, 0x01, 0x02 };
+
+static void presetSwitchWritesTheAddOnConfigOnlyWhenItDiffers()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  m.setAddOn(kMuxSpdif1);  // what the boot wrote: no write
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"mute\":false}").empty());
+  const std::string same = m.savePreset();
+  port.log.clear();
+  assert(m.switchPreset(same, &kMuxSpdif1).empty());  // same config: nothing over I2C
+  assert(port.log.empty());
+
+  // different config: exactly one write, between ramp down and ramp up
+  const std::string next = presetWith(m, 2, "{\"ch\":\"out\",\"idx\":1,\"route\":1}");
+  assert(m.switchPreset(next, &kMuxSpdif2).empty());
+  char wait[16];
+  snprintf(wait, sizeof(wait), "w %d", MATRIX_RAMP_MS);
+  assert(port.log == lines({ "g out 1 0.0000", wait, "r 1 1", "a 40 01 02", "g out 1 1.0000" }));
+  assert(m.addOn().data == 0x02);
+
+  // a Preset without its own config keeps the current one
+  port.log.clear();
+  assert(m.switchPreset(next).empty());
+  assert(port.log.empty() && m.addOn().data == 0x02);
+  m.switchToDefaults(&kMuxSpdif1);
+  assert(port.log == lines({ "g out 1 0.0000", wait, "r 1 0", "a 40 01 01" }));
+}
+
+// A mux change is a live edit: written at once, no ramp, autosaved like any other change.
+static void addOnEditIsWrittenAndAutosaved()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  m.setAddOn(kMuxSpdif1);
+  assert(edit(m, "{\"ch\":\"addon\",\"i2c\":[64,1,2]}", 1000).ok());
+  assert(port.log == lines({ "a 40 01 02" }));
+  assert(m.addOn() == kMuxSpdif2 && m.dirty());
+  assert(!m.saveDue(2999) && m.saveDue(3000));
+  m.markSaved();
+
+  port.log.clear();
+  assert(edit(m, "{\"ch\":\"addon\",\"i2c\":[64,1,2]}", 4000).ok());  // unchanged: nothing
+  assert(port.log.empty() && !m.dirty());
+
+  m.undo();  // the unchanged edit was the last one: nothing to revert
+  assert(edit(m, "{\"ch\":\"addon\",\"i2c\":[64,1,1]}", 5000).ok());
+  m.undo();
+  assert(m.addOn() == kMuxSpdif2 && !m.dirty());
+
+  port.log.clear();
+  assert(edit(m, "{\"ch\":\"addon\",\"i2c\":[64,1,256]}").status == MATRIX_EDIT_BAD_REQUEST);
+  assert(edit(m, "{\"ch\":\"addon\",\"i2c\":[64,1]}").status == MATRIX_EDIT_BAD_REQUEST);
+  assert(m.beginPresetSwitch());
+  assert(edit(m, "{\"ch\":\"addon\",\"i2c\":[64,1,1]}").status == MATRIX_EDIT_CONFLICT);
+  m.endPresetSwitch();
+  assert(port.log.empty() && m.addOn() == kMuxSpdif2);
+}
+
 int main()
 {
   editResultsDistinguishSuccessBadRequestAndConflict();
@@ -2028,6 +2092,8 @@ int main()
   presetSwitchRampsOnlyAudibleChannels();
   failedPresetSwitchWritesNothing();
   switchToDefaultsTakesTheSharedRamp();
+  presetSwitchWritesTheAddOnConfigOnlyWhenItDiffers();
+  addOnEditIsWrittenAndAutosaved();
   printf("all tests passed\n");
   return 0;
 }

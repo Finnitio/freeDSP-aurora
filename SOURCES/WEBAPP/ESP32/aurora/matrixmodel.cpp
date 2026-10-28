@@ -392,6 +392,7 @@ MatrixModel::MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad, int
     spdif_( 0 ), dirty_( false ), lastChange_( 0 ), presetSwitching_( false ), preset_( 0 )
 {
   undo_.valid = false;
+  addOn_ = MatrixAddOn();
   reset();
 }
 
@@ -437,6 +438,7 @@ void MatrixModel::saveUndo( void )
 {
   undo_.valid = true;
   undo_.spdif = spdif_;
+  undo_.addOn = addOn_;
   undo_.busLink = busLink_;
   for( int g = 0; g < MATRIX_OUT_LINKS; g++ ) undo_.outLink[g] = outLink_[g];
   for( int b = 0; b < nbus_; b++ ) undo_.bus[b] = bus_[b];
@@ -450,12 +452,12 @@ void MatrixModel::loadDefaults( MatrixRampSet* ramp )
   resetTo( ramp, false );
 }
 
-void MatrixModel::switchToDefaults( void )
+void MatrixModel::switchToDefaults( const MatrixAddOn* addOn )
 {
-  resetTo( NULL, true );
+  resetTo( NULL, true, addOn );
 }
 
-void MatrixModel::resetTo( MatrixRampSet* ramp, bool shared )
+void MatrixModel::resetTo( MatrixRampSet* ramp, bool shared, const MatrixAddOn* addOn )
 {
   Snapshot before;
   snapshot( before );
@@ -463,7 +465,7 @@ void MatrixModel::resetTo( MatrixRampSet* ramp, bool shared )
   reset();
   undo_.valid = false;
   dirty_ = false;
-  writeDiff( before, spdifBefore, ramp, shared );
+  writeDiff( before, spdifBefore, ramp, shared, addOn );
 }
 
 double MatrixModel::linear( const Channel& c ) const
@@ -532,7 +534,8 @@ void MatrixModel::writeChanges( const Snapshot& before )
  *  Preset switch's shared ramp around the difference: every marked Channel that was
  *  audible goes down to 0 first, one wait, the difference, then every marked Channel
  *  that is audible after the load goes up to its gain. */
-void MatrixModel::writeDiff( const Snapshot& before, uint32_t spdifBefore, MatrixRampSet* ramp, bool shared )
+void MatrixModel::writeDiff( const Snapshot& before, uint32_t spdifBefore, MatrixRampSet* ramp, bool shared,
+                             const MatrixAddOn* addOn )
 {
   bool marked[MATRIX_MAX_BUS + MATRIX_MAX_OUT];
   bool anyDown = false;
@@ -576,7 +579,11 @@ void MatrixModel::writeDiff( const Snapshot& before, uint32_t spdifBefore, Matri
   }
   if( spdif_ != spdifBefore )
     port_.writeSpdifOut( spdif_, spdif_ + 1 );
-  // Hook: further per-Preset writes that belong inside the ramp (Add-on B config, ticket 04) go here.
+  if( addOn && addOn->set && *addOn != addOn_ )
+  {
+    addOn_ = *addOn;
+    port_.writeAddOn( addOn_ );
+  }
   for( size_t i = 0; i < set.size(); i++ )
   {
     const Channel& was = set[i].kind == MATRIX_BUS ? before.bus[set[i].idx] : before.out[set[i].idx];
@@ -701,6 +708,29 @@ std::string MatrixModel::applyPatch( JsonObject patch, uint32_t nowMs )
     {
       spdif_ = sel;
       port_.writeSpdifOut( spdif_, spdif_ + 1 );
+      dirty_ = true;
+      lastChange_ = nowMs;
+    }
+    return "";
+  }
+  if( strcmp( kind, "addon" ) == 0 )
+  {
+    JsonArray i2c = patch["i2c"];
+    if( i2c.size() != 3 )
+      return "addon needs i2c [addr, reg, data]";
+    uint8_t v[3];
+    for( int i = 0; i < 3; i++ )
+    {
+      if( !i2c[i].is<long>() || i2c[i].as<long>() < 0 || i2c[i].as<long>() > 255 )
+        return "addon i2c bytes must be 0-255";
+      v[i] = (uint8_t)i2c[i].as<long>();
+    }
+    const MatrixAddOn cfg = { true, v[0], v[1], v[2] };
+    saveUndo();
+    if( cfg != addOn_ )
+    {
+      addOn_ = cfg;
+      port_.writeAddOn( addOn_ );
       dirty_ = true;
       lastChange_ = nowMs;
     }
@@ -881,6 +911,7 @@ void MatrixModel::undo( void )
   if( !undo_.valid )
     return;
   spdif_ = undo_.spdif;
+  addOn_ = undo_.addOn;
   busLink_ = undo_.busLink;
   for( int g = 0; g < MATRIX_OUT_LINKS; g++ ) outLink_[g] = undo_.outLink[g];
   for( int b = 0; b < nbus_; b++ ) bus_[b] = undo_.bus[b];
@@ -1201,12 +1232,12 @@ std::string MatrixModel::loadPreset( const std::string& json, MatrixRampSet* ram
   return load( json, ramp, false );
 }
 
-std::string MatrixModel::switchPreset( const std::string& json )
+std::string MatrixModel::switchPreset( const std::string& json, const MatrixAddOn* addOn )
 {
-  return load( json, NULL, true );
+  return load( json, NULL, true, addOn );
 }
 
-std::string MatrixModel::load( const std::string& json, MatrixRampSet* ramp, bool shared )
+std::string MatrixModel::load( const std::string& json, MatrixRampSet* ramp, bool shared, const MatrixAddOn* addOn )
 {
   // a smaller document usually fits; the 4x one only when that ran out of memory
   DynamicJsonDocument docS( 2 * json.size() + 1024 );
@@ -1290,7 +1321,7 @@ std::string MatrixModel::load( const std::string& json, MatrixRampSet* ramp, boo
   spdif_ = spdif;
   undo_.valid = false;
   dirty_ = false;
-  writeDiff( before, spdifBefore, ramp, shared );
+  writeDiff( before, spdifBefore, ramp, shared, addOn );
   return "";
 }
 
