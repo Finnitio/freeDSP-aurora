@@ -48,7 +48,7 @@ struct MatrixCoef
 #define MATRIX_OUT_LINKS 4  // Output Link groups A..D
 #define MATRIX_MAX_DELAY_SAMPLES 1920  // 40 ms at 48 kHz
 #define MATRIX_SAVE_DELAY_MS 2000
-#define MATRIX_RAMP_MS 20  // gain slew to settle before a route/Source switch or a Slot layout change
+#define MATRIX_RAMP_MS 20  // gain slew to settle before a route/Source switch or a biquad write
 
 class MatrixModel
 {
@@ -154,7 +154,6 @@ private:
 
   double linear( const Channel& c ) const;
   static int used( const Channel& c );  // biquads taken by the Slots
-  static bool layoutChanged( const Channel& before, const Channel& after );
   int slotCount( void ) const;
   std::string applySlot( JsonObject op, Channel& c ) const;
   void stages( const Channel& c, std::vector<Coef>& out ) const;
