@@ -30,6 +30,8 @@
 #if HAVE_DISPLAY
 extern void updateUI(void);
 extern Display myDisplay;
+extern volatile bool apOpenFallback;
+extern const char* apPasswordError;
 #endif
 
 extern String sourceNames[kNumSourceNames];
@@ -895,6 +897,10 @@ void handleGetWifiConfigJson( AsyncWebServerRequest* request )
   jsonResponse["apname"] = Settings.apname;
   jsonResponse["apchannel"] = Settings.apchannel;
   jsonResponse["ssid"] = Settings.ssid;
+  // AP runs open because the stored password is invalid (until restart with a valid one)
+  jsonResponse["apopenfallback"] = (bool)apOpenFallback;
+  if( apOpenFallback && apPasswordError )
+    jsonResponse["appwderror"] = apPasswordError;
 
   response->setLength();
   request->send(response);
