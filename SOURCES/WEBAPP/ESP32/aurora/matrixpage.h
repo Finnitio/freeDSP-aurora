@@ -135,9 +135,13 @@ function sendVol(v){  // while dragging: at once, then at most every 100 ms with
     vt=setTimeout(go,100);};
   go();
 }
+// The A-D buttons: on(i) marks slot i, off(i) disables it, a click runs click+"(i)".
+function presetButtons(on,click,off){
+  var h="";for(var i=0;i<4;i++)h+="<button class='"+(on(i)?"on":"")+"'"+(off&&off(i)?" disabled":"")+" onclick='"+click+"("+i+")'>"+"ABCD"[i]+"</button>";
+  return h;
+}
 function drawPresets(cur){  // during a Preset test no slot is marked: the row is hidden, not removed
-  var h="";for(var i=0;i<4;i++)h+="<button class='"+(i==cur&&!ab?"on":"")+"' onclick='if(!ab)preset("+i+")'>"+"ABCD"[i]+"</button>";
-  document.getElementById("presets").innerHTML=h;
+  document.getElementById("presets").innerHTML=presetButtons(function(i){return i==cur&&!ab;},"if(!ab)preset");
 }
 // From the click until the state has been reloaded no Preset edit is sent: edits made meanwhile
 // are dropped rather than sent to the new Preset. Settles once that is over (the Preset test chains on it).
@@ -426,8 +430,7 @@ function abOpen(sel,n){
   abEl("trounds").value=n||10;abShow("tset");abTicks();
 }
 function abTicks(){
-  var h="";for(var i=0;i<4;i++)h+="<button class='"+(abSel.indexOf(i)<0?"":"on")+"'"+(presetUsed[i]?"":" disabled")+" onclick='abTick("+i+")'>"+"ABCD"[i]+"</button>";
-  abEl("tpre").innerHTML=h;abEl("tstart").disabled=abSel.length<2;
+  abEl("tpre").innerHTML=presetButtons(function(i){return abSel.indexOf(i)>=0;},"abTick",function(i){return !presetUsed[i];});abEl("tstart").disabled=abSel.length<2;
 }
 function abTick(i){var j=abSel.indexOf(i);if(j<0)abSel.push(i);else abSel.splice(j,1);abTicks();}
 function abClose(){abEl("abt").style.display="none";}
