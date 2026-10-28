@@ -142,6 +142,7 @@ function drawPresets(cur){  // during a Preset test no slot is marked: the row i
 // From the click until the state has been reloaded no Preset edit is sent: edits made meanwhile
 // are dropped rather than sent to the new Preset. Settles once that is over (the Preset test chains on it).
 var switching=false;
+function editsBlocked(){return switching||ab;}  // ab: no edit during a Preset test
 function preset(p){
   if(switching)return Promise.resolve();
   switching=true;
@@ -158,7 +159,7 @@ function importFile(el){
   if(f)f.text().then(importPreset,function(){say("Import failed: cannot read the file");});
 }
 function importPreset(text){
-  if(switching||ab)return;
+  if(editsBlocked())return;
   switching=true;
   say("Importing preset...");
   fetch("/matrix/import?preset="+activePreset,{method:"POST",headers:{"Content-Type":"application/json"},body:text})
@@ -175,7 +176,7 @@ function send(ch,idx,f){
   return post(p);
 }
 function post(p){
-  if(switching||ab)return Promise.resolve();  // ab: no edit during a Preset test
+  if(editsBlocked())return Promise.resolve();
   var n=++seq;  // replies older than one already shown are ignored
   return fetch("/matrix",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)})
    .then(function(r){return r.text().then(function(t){
@@ -200,7 +201,7 @@ function fieldKey(e,el){
 // Text that is no number is sent as null: the firmware's reply names the problem and the field reverts.
 function commit(el){
   var d=el.dataset,x=num(el.value);
-  if(switching||ab){el.value=d.v;return;}  // dropped; the reload shows the loaded value
+  if(editsBlocked()){el.value=d.v;return;}  // dropped; the reload shows the loaded value
   if(el.value==d.v||x===num(d.v))return;
   d.v=el.value;  // until the reply: Enter followed by Tab sends once
   var i=parseInt(d.i),f={};
