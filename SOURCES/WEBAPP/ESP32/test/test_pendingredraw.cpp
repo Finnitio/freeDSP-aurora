@@ -1,5 +1,5 @@
 // Host tests for the deferred display redraw in loop().
-// Build & run: g++ -std=c++11 -Wall -o test_pendingredraw SOURCES/WEBAPP/ESP32/test/test_pendingredraw.cpp && ./test_pendingredraw
+// Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
 #include <cassert>
 #include <cstdio>
 #include <vector>

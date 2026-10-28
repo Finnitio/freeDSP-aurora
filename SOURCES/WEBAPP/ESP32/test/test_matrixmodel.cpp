@@ -1,6 +1,7 @@
 // Host tests for the matrix model (Bus Sources, Output routes, mute, gain, names, presets).
-// Build & run (ArduinoJson is header-only):
-//   g++ -std=gnu++11 -Wall -I ~/Documents/Arduino/libraries/ArduinoJson/src -o test_matrixmodel SOURCES/WEBAPP/ESP32/test/test_matrixmodel.cpp SOURCES/WEBAPP/ESP32/aurora/matrixmodel.cpp SOURCES/WEBAPP/ESP32/aurora/AudioFilterFactory.cpp && ./test_matrixmodel
+// Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
+// Links: matrixmodel.cpp AudioFilterFactory.cpp
+// Uses: ArduinoJson
 #include <cassert>
 #include <cmath>
 #include <cstdio>

@@ -1,5 +1,5 @@
 // Host tests for the STA retry policy.
-// Build & run: g++ -std=c++11 -Wall -o test_staretry SOURCES/WEBAPP/ESP32/test/test_staretry.cpp && ./test_staretry
+// Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
 #include <cassert>
 #include <cstdio>
 #include "../aurora/staretry.h"
