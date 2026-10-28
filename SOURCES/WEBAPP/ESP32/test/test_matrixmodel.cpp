@@ -1059,6 +1059,11 @@ static void slotRulesAreTheSameForEditsAndPresets()
   FakePort invalidPort;
   MatrixModel invalidModel(invalidPort, 2, 8, 8);
   assert(addSlot(invalidModel, "\"type\":\"hp\",\"design\":\"lr\",\"order\":6,\"freq\":19") == "freq out of range");
+  assert(addSlot(invalidModel, "\"type\":\"peq\"").empty());
+  assert(setSlot(invalidModel, 0, "\"freq\":5,\"bypass\":\"x\"") == "freq out of range");
+  assert(setSlot(invalidModel, 0, "\"freq\":5,\"type\":\"bogus\"") == "freq out of range");
+  assert(setSlot(invalidModel, 0, "\"q\":50,\"design\":\"x\"") == "q out of range");
+  assert(setSlot(invalidModel, 0, "\"freq\":5,\"q\":\"x\"") == "freq out of range");
 
   // Non-crossover design/order are accepted for compatibility, then normalized
   // through both paths so a later type change cannot revive hidden settings.

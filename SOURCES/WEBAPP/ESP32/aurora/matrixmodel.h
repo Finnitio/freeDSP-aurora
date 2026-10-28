@@ -125,6 +125,7 @@ private:
   static int cost( const Slot& s );
   static int choiceCount( void );
   static Slot choice( int n );  // the n-th selectable type/order, other fields default
+  static const char* paramOutOfRange( const Slot& s );  // NULL if freq, q, gain, slope are in range
   static const char* normalizeSlot( Slot& s );  // NULL if the final Slot invariants hold
   static int slotCoefs( const Slot& s, MatrixCoef* out );
 

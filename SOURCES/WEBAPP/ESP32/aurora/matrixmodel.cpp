@@ -152,6 +152,20 @@ MatrixModel::Slot MatrixModel::choice( int n )
  *  has been parsed. Non-crossover design/order are compatibility input and are
  *  normalized away; the returned field names let the live editor keep its
  *  specific rejection reasons while preset loading keeps its single reason. */
+/*! The first of freq, q, gain, slope outside its range, else NULL. */
+const char* MatrixModel::paramOutOfRange( const Slot& s )
+{
+  if( !( s.freq >= kFreqMin && s.freq <= kFreqMax ) )
+    return "freq";
+  if( !( s.q >= kQMin && s.q <= kQMax ) )
+    return "q";
+  if( !( s.gain >= kPeqGainMin && s.gain <= kPeqGainMax ) )
+    return "gain";
+  if( !( s.slope >= kSlopeMin && s.slope <= kSlopeMax ) )
+    return "slope";
+  return NULL;
+}
+
 const char* MatrixModel::normalizeSlot( Slot& s )
 {
   if( s.type < SLOT_PEQ || s.type > SLOT_PHASE )
@@ -161,14 +175,9 @@ const char* MatrixModel::normalizeSlot( Slot& s )
     s.lr = false;
     s.order = 1;
   }
-  if( !( s.freq >= kFreqMin && s.freq <= kFreqMax ) )
-    return "freq";
-  if( !( s.q >= kQMin && s.q <= kQMax ) )
-    return "q";
-  if( !( s.gain >= kPeqGainMin && s.gain <= kPeqGainMax ) )
-    return "gain";
-  if( !( s.slope >= kSlopeMin && s.slope <= kSlopeMax ) )
-    return "slope";
+  const char* param = paramOutOfRange( s );
+  if( param )
+    return param;
   if( ( s.type == SLOT_HP || s.type == SLOT_LP ) && !orderValid( s.lr, s.order ) )
     return "order";
   return NULL;
@@ -300,6 +309,10 @@ std::string MatrixModel::applySlot( JsonObject op, Channel& c ) const
     if( !op[nums[k].key].is<float>() )
       return std::string( nums[k].key ) + " must be a number";
     *nums[k].v = op[nums[k].key].as<float>();
+    // range per number as it is read: the established first error of an edit
+    const char* param = paramOutOfRange( s );
+    if( param )
+      return std::string( param ) + " out of range";
   }
   if( op.containsKey( "bypass" ) )
   {
