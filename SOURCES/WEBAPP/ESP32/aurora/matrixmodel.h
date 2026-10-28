@@ -57,13 +57,15 @@ public:
    *  Output delay limit in samples (0 = unknown), capped at MATRIX_MAX_DELAY_SAMPLES. */
   MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad = 0, int maxDelay = 0 );
 
-  /*! Applies a patch {"ch":"bus"|"out","idx":n, name, mute, gain, source (Bus), route (Output),
+  /*! Applies a patch {"ch":"bus"|"out","idx":n, name, mute, gain, link, source (Bus), route (Output),
    *  gainBypass, and on Outputs only polarity (bool), delayUs (rounded to whole samples, max 40 ms)
    *  and delayBypass,
    *  slot: {"op":"add", type, design, order, freq, q, gain, slope} | {"op":"del","i"} | {"op":"set","i", the same, bypass}}.
    *  type: "peq" (default), "hp", "lp", "lshelf", "hshelf", "phase"; HP/LP: design "bw" (order 1-8, default)
    *  or "lr" (order 2, 4, 8), default order 2; shelf slope 0.1-1.
    *  SPDIF out: {"ch":"spdif","sel":code} with the left code of one of the offered pairs (stateJson "spdifopts").
+   *  Link settings: {"ch":"link","scope":"bus"|"out","group":"bus"|"A".."D",
+   *  "mute"|"filters"|"gain"|"delay":bool}. Buses cannot link delay.
    *  Slots sit on the Channel's biquads in the order added, each taking cost() of them: Butterworth
    *  order n = ceil(n/2), Linkwitz-Riley order n = n/2, everything else 1. An add or a type/order
    *  change that would exceed the budget is rejected.
@@ -106,6 +108,7 @@ public:
 
 private:
   void reset( void );
+  void saveUndo( void );
 
   enum SlotType { SLOT_PEQ, SLOT_HP, SLOT_LP, SLOT_LSHELF, SLOT_HSHELF, SLOT_PHASE };
 
@@ -134,7 +137,13 @@ private:
     int delay;         // samples, Outputs only
     bool delayBypass;  // Outputs only
     int sel;    // Bus: Source code; Output: route
+    int link;   // -1 = none; Bus uses 0, Outputs use 0..3 (A..D)
     std::vector<Slot> slots;
+  };
+
+  struct LinkGroup
+  {
+    bool mute, filters, gain, delay;
   };
 
   typedef MatrixCoef Coef;
@@ -145,6 +154,7 @@ private:
   std::string applySlot( JsonObject op, Channel& c ) const;
   void stages( const Channel& c, std::vector<Coef>& out ) const;
   void writeStages( MatrixChannelKind kind, int idx, const Channel& c, const Channel* prev );
+  void writeChannelChanges( bool isBus, int idx, const Channel& before, const Channel& after );
   void putChannel( JsonArray arr, const Channel& c, const char* selKey, bool withLimits ) const;
   std::string readChannel( JsonObject o, bool isBus, Channel& c ) const;
 
@@ -153,6 +163,8 @@ private:
   int maxDelay_;  // samples: the plugin's maxdly, at most MATRIX_MAX_DELAY_SAMPLES
   Channel bus_[MATRIX_MAX_BUS];
   Channel out_[MATRIX_MAX_OUT];
+  LinkGroup busLink_;
+  LinkGroup outLink_[4];
   uint32_t spdif_;  // left code of the SPDIF out pair
   bool dirty_;
   uint32_t lastChange_;
@@ -161,11 +173,11 @@ private:
   struct Undo
   {
     bool valid;
-    bool isSpdif;
     uint32_t spdif;
-    bool isBus;
-    int idx;
-    Channel ch;
+    Channel bus[MATRIX_MAX_BUS];
+    Channel out[MATRIX_MAX_OUT];
+    LinkGroup busLink;
+    LinkGroup outLink[4];
     bool dirty;
     uint32_t lastChange;
   } undo_;
