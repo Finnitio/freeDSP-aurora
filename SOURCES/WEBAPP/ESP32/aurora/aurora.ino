@@ -33,6 +33,7 @@
 #include "apconfig.h"
 #include "i2cworker.h"
 #include "matrix.h"
+#include "pendingredraw.h"
 
 /**
  * These are required for the espmake32 automatic library resolver
@@ -184,26 +185,41 @@ void uploadDspFirmware( void )
 }
 
 #if HAVE_DISPLAY
+static String uiIp( void )
+{
+  if( WiFi.status() != WL_CONNECTED )
+    return String( F("Not Connected") );
+  return WiFi.localIP().toString();
+}
+
 //==============================================================================
-/*! Updates the user interface on the display
- *
+/*! Updates the user interface on the display. Waits for the bus, so it is for
+ *  setup() and worker jobs; loop() requests a redraw from pendingRedraw instead.
  */
 void updateUI( void )
 {
   if(haveDisplay)
   {
-    String ip;
-    if( WiFi.status() != WL_CONNECTED )
-      ip = "Not Connected";
-    else
-      ip = WiFi.localIP().toString();
-
     if( (editMode == 0) || (editMode == 1) || (editMode == 2) )
-    {
-      myDisplay.drawUI(currentPlugInName.c_str(), ip.c_str(), currentPreset, masterVolume.val, editMode);
-    }
-
+      myDisplay.drawUI(currentPlugInName.c_str(), uiIp().c_str(), currentPreset, masterVolume.val, editMode);
   }
+}
+
+//==============================================================================
+/*! The redraw loop() owes. Drawn only when the bus is free, so loop() never
+ *  waits for a preset load or FIR upload on the worker.
+ */
+static PendingRedraw pendingRedraw;
+
+static bool tryDrawScreen( PendingRedraw::Screen screen )
+{
+  if( !haveDisplay )
+    return true;
+  if( screen == PendingRedraw::SWITCHING_PRESET )
+    return myDisplay.tryDrawSwitchingPreset();
+  if( (editMode == 0) || (editMode == 1) || (editMode == 2) )
+    return myDisplay.tryDrawUI(currentPlugInName.c_str(), uiIp().c_str(), currentPreset, masterVolume.val, editMode);
+  return true;
 }
 #endif
 
@@ -696,6 +712,11 @@ void loop()
   TIMERG0.wdt_feed=1;
   TIMERG0.wdt_wprotect=0;
 
+  // Worker jobs and web handlers set needUpdateUI. Taken before the input below,
+  // so a "switching preset" requested in this pass is not overdrawn by the old UI.
+  if( needUpdateUI.exchange( false ) )
+    pendingRedraw.request( PendingRedraw::UI );
+
   matrixLoop();
 
 
@@ -734,7 +755,7 @@ void loop()
     }
     else if( editMode == 1 )
     {
-      myDisplay.drawSwitchingPreset();
+      pendingRedraw.request( PendingRedraw::SWITCHING_PRESET );
 
       queue_next_preset();
 
@@ -764,7 +785,7 @@ void loop()
     }
     else if( editMode == 1 )
     {
-      myDisplay.drawSwitchingPreset();
+      pendingRedraw.request( PendingRedraw::SWITCHING_PRESET );
 
       queue_prev_preset();
 
@@ -813,7 +834,7 @@ void loop()
       }
       else if((irval == APPLE_A_REMOTE_MENU) || (irval == APPLE_B_REMOTE_MENU))
       {
-        myDisplay.drawSwitchingPreset();
+        pendingRedraw.request( PendingRedraw::SWITCHING_PRESET );
         queue_next_preset();
       }
     }
@@ -821,12 +842,12 @@ void loop()
     {
       if((irval == APPLE_A_REMOTE_LEFT) || (irval == APPLE_B_REMOTE_LEFT))
       {
-        myDisplay.drawSwitchingPreset();
+        pendingRedraw.request( PendingRedraw::SWITCHING_PRESET );
         queue_prev_preset();
       }
       else if((irval == APPLE_A_REMOTE_RIGHT) || (irval == APPLE_B_REMOTE_RIGHT))
       {
-        myDisplay.drawSwitchingPreset();
+        pendingRedraw.request( PendingRedraw::SWITCHING_PRESET );
         queue_next_preset();
       }
     }
@@ -836,10 +857,8 @@ void loop()
   }
   #endif
 
-  if( needUpdateUI )
-  {
-    updateUI();
-    needUpdateUI = false;
-  }
+  // Drawn only once the bus is free, so the input above keeps being read
+  // while the worker runs a preset load or FIR upload.
+  pendingRedraw.serve( tryDrawScreen );
 
 }
