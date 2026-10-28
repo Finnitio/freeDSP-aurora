@@ -1,5 +1,5 @@
 // Host tests for the ADAU1452 safeload register sequence.
-// Build & run: g++ -std=c++11 -Wall -o test_safeload SOURCES/WEBAPP/ESP32/test/test_safeload.cpp && ./test_safeload
+// Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
 #include <cassert>
 #include <cstdio>
 #include <vector>

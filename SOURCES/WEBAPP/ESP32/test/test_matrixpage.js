@@ -1,5 +1,5 @@
 // Browser-facing contract checks for the hand-written Matrix page.
-// Run: node SOURCES/WEBAPP/ESP32/test/test_matrixpage.js
+// Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
 const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");

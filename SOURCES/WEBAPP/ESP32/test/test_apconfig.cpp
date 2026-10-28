@@ -1,5 +1,5 @@
 // Host tests for AP and WiFi (STA) config validation and captive-portal answers.
-// Build & run: g++ -std=c++11 -Wall -o test_apconfig SOURCES/WEBAPP/ESP32/test/test_apconfig.cpp && ./test_apconfig
+// Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
 #include <cassert>
 #include <cstdio>
 #include <cstring>
