@@ -269,6 +269,15 @@ private:
     Channel out[MATRIX_MAX_OUT];
   };
   bool needsRamp( const Channel& before, const Channel& after ) const;
+  struct ChannelDiff
+  {
+    MatrixChannelKind kind;
+    int idx;
+    const Channel& was;
+    const Channel& now;
+  };
+  ChannelDiff diffAt( const Snapshot& before, int n ) const;
+  void writeBlocks( const ChannelDiff& d );
   void snapshot( Snapshot& s ) const;
   void writeChanges( const Snapshot& before );
   void writeDiff( const Snapshot& before, uint32_t spdifBefore, MatrixRampSet* ramp, bool shared,

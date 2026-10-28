@@ -489,6 +489,29 @@ double MatrixModel::linear( const Channel& c ) const
   return c.mute ? 0.0 : c.gainBypass ? 1.0 : pow( 10.0, c.gain / 20.0 );
 }
 
+/*! Channel n (Buses first, then Outputs) before and now. */
+MatrixModel::ChannelDiff MatrixModel::diffAt( const Snapshot& before, int n ) const
+{
+  if( n < nbus_ )
+    return { MATRIX_BUS, n, before.bus[n], bus_[n] };
+  return { MATRIX_OUT, n - nbus_, before.out[n - nbus_], out_[n - nbus_] };
+}
+
+/*! The route or Source, polarity and delay writes of a Channel that differ (not gain, not biquads). */
+void MatrixModel::writeBlocks( const ChannelDiff& d )
+{
+  if( d.now.sel != d.was.sel )
+  {
+    if( d.kind == MATRIX_BUS ) port_.writeSource( d.idx, (uint32_t)d.now.sel ); else port_.writeRoute( d.idx, d.now.sel );
+  }
+  if( d.kind == MATRIX_OUT )
+  {
+    if( d.now.polarity != d.was.polarity ) port_.writePolarity( d.idx, d.now.polarity );
+    if( ( d.now.delayBypass ? 0 : d.now.delay ) != ( d.was.delayBypass ? 0 : d.was.delay ) )
+      port_.writeDelay( d.idx, d.now.delayBypass ? 0 : d.now.delay );
+  }
+}
+
 /*! Writes what differs from the snapshot. Channels that switch their route or Source, or rewrite
  *  any biquad, ramp together: all down, one wait, every write, all up. */
 void MatrixModel::writeChanges( const Snapshot& before )
@@ -497,14 +520,11 @@ void MatrixModel::writeChanges( const Snapshot& before )
   bool anyRamp = false;
   for( int n = 0; n < nbus_ + nout_; n++ )
   {
-    const MatrixChannelKind kind = n < nbus_ ? MATRIX_BUS : MATRIX_OUT;
-    const int idx = n < nbus_ ? n : n - nbus_;
-    const Channel& was = kind == MATRIX_BUS ? before.bus[idx] : before.out[idx];
-    const Channel& now = kind == MATRIX_BUS ? bus_[idx] : out_[idx];
-    ramp[n] = linear( now ) != 0.0 && ( now.sel != was.sel || needsRamp( was, now ) );
+    const ChannelDiff d = diffAt( before, n );
+    ramp[n] = linear( d.now ) != 0.0 && ( d.now.sel != d.was.sel || needsRamp( d.was, d.now ) );
     if( ramp[n] )
     {
-      port_.writeGain( kind, idx, 0.0 );
+      port_.writeGain( d.kind, d.idx, 0.0 );
       anyRamp = true;
     }
   }
@@ -512,35 +532,22 @@ void MatrixModel::writeChanges( const Snapshot& before )
     port_.waitMs( MATRIX_RAMP_MS );
   for( int n = 0; n < nbus_ + nout_; n++ )
   {
-    const MatrixChannelKind kind = n < nbus_ ? MATRIX_BUS : MATRIX_OUT;
-    const int idx = n < nbus_ ? n : n - nbus_;
-    const Channel& was = kind == MATRIX_BUS ? before.bus[idx] : before.out[idx];
-    const Channel& now = kind == MATRIX_BUS ? bus_[idx] : out_[idx];
-    if( !ramp[n] && linear( now ) != linear( was ) ) port_.writeGain( kind, idx, linear( now ) );
-    if( now.sel != was.sel )
+    const ChannelDiff d = diffAt( before, n );
+    if( !ramp[n] && linear( d.now ) != linear( d.was ) ) port_.writeGain( d.kind, d.idx, linear( d.now ) );
+    writeBlocks( d );
+    bool slotsChanged = d.now.slots.size() != d.was.slots.size();
+    for( size_t i = 0; !slotsChanged && i < d.now.slots.size(); i++ )
     {
-      if( kind == MATRIX_BUS ) port_.writeSource( idx, (uint32_t)now.sel ); else port_.writeRoute( idx, now.sel );
-    }
-    if( kind == MATRIX_OUT )
-    {
-      if( now.polarity != was.polarity ) port_.writePolarity( idx, now.polarity );
-      if( ( now.delayBypass ? 0 : now.delay ) != ( was.delayBypass ? 0 : was.delay ) )
-        port_.writeDelay( idx, now.delayBypass ? 0 : now.delay );
-    }
-    bool slotsChanged = now.slots.size() != was.slots.size();
-    for( size_t i = 0; !slotsChanged && i < now.slots.size(); i++ )
-    {
-      const Slot& a = now.slots[i]; const Slot& b = was.slots[i];
+      const Slot& a = d.now.slots[i]; const Slot& b = d.was.slots[i];
       slotsChanged = a.bypass != b.bypass || a.type != b.type || a.lr != b.lr || a.order != b.order
         || a.freq != b.freq || a.q != b.q || a.gain != b.gain || a.slope != b.slope;
     }
-    if( slotsChanged ) writeStages( kind, idx, now, &was );
+    if( slotsChanged ) writeStages( d.kind, d.idx, d.now, &d.was );
   }
   for( int n = 0; n < nbus_ + nout_; n++ )
   {
-    const MatrixChannelKind kind = n < nbus_ ? MATRIX_BUS : MATRIX_OUT;
-    const int idx = n < nbus_ ? n : n - nbus_;
-    if( ramp[n] ) port_.writeGain( kind, idx, linear( kind == MATRIX_BUS ? bus_[idx] : out_[idx] ) );
+    const ChannelDiff d = diffAt( before, n );
+    if( ramp[n] ) port_.writeGain( d.kind, d.idx, linear( d.now ) );
   }
 }
 
@@ -557,41 +564,23 @@ void MatrixModel::writeDiff( const Snapshot& before, uint32_t spdifBefore, Matri
   bool anyDown = false;
   for( int n = 0; n < nbus_ + nout_; n++ )
   {
-    const MatrixChannelKind kind = n < nbus_ ? MATRIX_BUS : MATRIX_OUT;
-    const int idx = n < nbus_ ? n : n - nbus_;
-    const Channel& was = kind == MATRIX_BUS ? before.bus[idx] : before.out[idx];
-    const Channel& now = kind == MATRIX_BUS ? bus_[idx] : out_[idx];
-    marked[n] = now.sel != was.sel || needsRamp( was, now );
-    if( shared && marked[n] && linear( was ) != 0.0 )
+    const ChannelDiff d = diffAt( before, n );
+    marked[n] = d.now.sel != d.was.sel || needsRamp( d.was, d.now );
+    if( shared && marked[n] && linear( d.was ) != 0.0 )
     {
-      port_.writeGain( kind, idx, 0.0 );
+      port_.writeGain( d.kind, d.idx, 0.0 );
       anyDown = true;
     }
   }
   if( anyDown )
     port_.waitMs( MATRIX_RAMP_MS );
 
-  MatrixRampSet set;
   for( int n = 0; n < nbus_ + nout_; n++ )
   {
-    const MatrixChannelKind kind = n < nbus_ ? MATRIX_BUS : MATRIX_OUT;
-    const int idx = n < nbus_ ? n : n - nbus_;
-    const Channel& was = kind == MATRIX_BUS ? before.bus[idx] : before.out[idx];
-    const Channel& now = kind == MATRIX_BUS ? bus_[idx] : out_[idx];
-    if( marked[n] )
-      set.push_back( { kind, idx, linear( now ) } );
-    if( !marked[n] && linear( now ) != linear( was ) ) port_.writeGain( kind, idx, linear( now ) );
-    if( now.sel != was.sel )
-    {
-      if( kind == MATRIX_BUS ) port_.writeSource( idx, (uint32_t)now.sel ); else port_.writeRoute( idx, now.sel );
-    }
-    if( kind == MATRIX_OUT )
-    {
-      if( now.polarity != was.polarity ) port_.writePolarity( idx, now.polarity );
-      if( ( now.delayBypass ? 0 : now.delay ) != ( was.delayBypass ? 0 : was.delay ) )
-        port_.writeDelay( idx, now.delayBypass ? 0 : now.delay );
-    }
-    writeStages( kind, idx, now, &was );
+    const ChannelDiff d = diffAt( before, n );
+    if( !marked[n] && linear( d.now ) != linear( d.was ) ) port_.writeGain( d.kind, d.idx, linear( d.now ) );
+    writeBlocks( d );
+    writeStages( d.kind, d.idx, d.now, &d.was );
   }
   if( spdif_ != spdifBefore )
     port_.writeSpdifOut( spdif_, spdif_ + 1 );
@@ -600,12 +589,17 @@ void MatrixModel::writeDiff( const Snapshot& before, uint32_t spdifBefore, Matri
     addOn_ = *addOn;
     port_.writeAddOn( addOn_ );
   }
-  for( size_t i = 0; i < set.size(); i++ )
+  MatrixRampSet set;
+  for( int n = 0; n < nbus_ + nout_; n++ )
   {
-    const Channel& was = set[i].kind == MATRIX_BUS ? before.bus[set[i].idx] : before.out[set[i].idx];
+    if( !marked[n] )
+      continue;
+    const ChannelDiff d = diffAt( before, n );
+    const double gain = linear( d.now );
+    set.push_back( { d.kind, d.idx, gain } );
     // shared: the ramp down already left a now-silent Channel at 0; plain: only a changed gain
-    if( shared ? set[i].linear != 0.0 : set[i].linear != linear( was ) )
-      port_.writeGain( set[i].kind, set[i].idx, set[i].linear );
+    if( shared ? gain != 0.0 : gain != linear( d.was ) )
+      port_.writeGain( d.kind, d.idx, gain );
   }
   if( ramp )
     ramp->swap( set );
