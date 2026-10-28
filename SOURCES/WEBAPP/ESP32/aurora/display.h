@@ -3,10 +3,12 @@
 
 #include "OLED128x64_SH1106.h"
 #include "OLED128x64_SSD1309.h"
+#include <atomic>
+
 #include "i2cworker.h"
 
 extern bool haveDisplay;
-extern bool needUpdateUI;
+extern std::atomic<bool> needUpdateUI;  // set by any task, redrawn by loop()
 extern int editMode;
 
 extern OLED128x64_SH1106 SH1106;
@@ -45,6 +47,27 @@ public:
     I2cLock lock;
     if(pDisplayDriver)
       pDisplayDriver->drawSwitchingPreset();
+  }
+
+  // Non-blocking variants for loop(): return false (nothing drawn) if the bus is busy.
+  bool tryDrawUI(const char* plugin, const char* ip, const int currentPreset, float vol, int editMode = 0)
+  {
+    if(!i2cTryLock())
+      return false;
+    if(pDisplayDriver)
+      pDisplayDriver->drawUI(plugin, ip, currentPreset, vol, editMode);
+    i2cUnlock();
+    return true;
+  }
+
+  bool tryDrawSwitchingPreset(void)
+  {
+    if(!i2cTryLock())
+      return false;
+    if(pDisplayDriver)
+      pDisplayDriver->drawSwitchingPreset();
+    i2cUnlock();
+    return true;
   }
 
 private:

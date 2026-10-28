@@ -8,5 +8,5 @@ OLED128x64_SH1106 SH1106;
 OLED128x64_SSD1309 SSD1309;
 
 bool haveDisplay = true;
-bool needUpdateUI = false;
+std::atomic<bool> needUpdateUI( false );
 int editMode = 0;
