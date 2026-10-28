@@ -130,7 +130,7 @@ function preset(p){
 // writes the difference and Autosave stores it. Edits wait for the reply like during a switch.
 function importFile(el){
   var f=el.files&&el.files[0];el.value="";  // the same file can be chosen again
-  if(f)f.text().then(importPreset);
+  if(f)f.text().then(importPreset,function(){say("Import failed: cannot read the file");});
 }
 function importPreset(text){
   if(switching)return;
@@ -141,7 +141,8 @@ function importPreset(text){
      if(!r.ok){say("Import failed: "+t);if(r.status==409)return load();return;}
      seen=++seq;st=JSON.parse(t);activePreset=st.preset;draw();say("Preset imported");});},
     function(){say("Import failed: no answer from the DSP");})
-   .then(function(){switching=false;});
+   .catch(function(){say("Import failed: unreadable reply from the DSP");})
+   .then(function(){switching=false;});  // always: a failure above must not lock the page
 }
 // Sends a patch, the reply is the new state or the reason it was refused.
 function send(ch,idx,f){

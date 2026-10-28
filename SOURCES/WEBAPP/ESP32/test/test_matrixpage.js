@@ -532,6 +532,24 @@ async function exportImportTests() {
   assert.strictEqual(picker.value, "");
   held(res(true, 200, JSON.stringify(sample())));
   await settle();
+  sent.length = 0;
+
+  // A reply the page cannot read must not lock the page: edits resume.
+  context.importPreset(file);
+  sent.length = 0;
+  held(res(true, 200, "<html>not the state</html>"));
+  await settle();
+  assert(/^Import failed/.test(els.msg.textContent), "an unreadable reply is reported");
+  context.send("out", 0, { mute: true });
+  await settle();
+  assert.strictEqual(sent.length, 1, "edits resume after an unreadable import reply");
+  sent.length = 0;
+
+  // A file that cannot be read is reported and sends nothing.
+  context.importFile({ files: [{ text: () => Promise.reject(new Error("unreadable")) }], value: "x" });
+  await settle();
+  assert.deepStrictEqual(sent, []);
+  assert(/^Import failed/.test(els.msg.textContent), "an unreadable file is reported");
 }
 
 main().catch((error) => {
