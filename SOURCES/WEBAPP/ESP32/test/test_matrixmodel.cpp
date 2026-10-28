@@ -947,6 +947,62 @@ static void presetSlotFieldsAreTypeChecked()
   assert(c.loadPreset(p).empty());
 }
 
+static void slotRulesAreTheSameForEditsAndPresets()
+{
+  const char* invalid[] = {
+    "\"type\":\"bogus\"",
+    "\"type\":\"hp\",\"design\":\"bessel\"",
+    "\"type\":\"hp\",\"design\":\"lr\",\"order\":6",
+    "\"freq\":19",
+    "\"q\":20.1",
+    "\"gain\":24.1",
+    "\"type\":\"lshelf\",\"slope\":0.09",
+  };
+  for (size_t k = 0; k < sizeof(invalid) / sizeof(invalid[0]); k++)
+  {
+    FakePort editPort;
+    MatrixModel edited(editPort, 2, 8, 8);
+    assert(!addSlot(edited, invalid[k]).empty());
+
+    FakePort sourcePort;
+    MatrixModel source(sourcePort, 2, 8, 8);
+    assert(addSlot(source, "\"type\":\"peq\"").empty());
+    DynamicJsonDocument doc(16384);
+    assert(!deserializeJson(doc, source.savePreset()));
+    JsonObject slot = doc["outs"][1]["slots"][0];
+    if (k == 0) slot["type"] = "bogus";
+    if (k == 1) { slot["type"] = "hp"; slot["design"] = "bessel"; }
+    if (k == 2) { slot["type"] = "hp"; slot["design"] = "lr"; slot["order"] = 6; }
+    if (k == 3) slot["freq"] = 19;
+    if (k == 4) slot["q"] = 20.1;
+    if (k == 5) slot["gain"] = 24.1;
+    if (k == 6) { slot["type"] = "lshelf"; slot["slope"] = 0.09; }
+    std::string preset;
+    serializeJson(doc, preset);
+    FakePort loadPort;
+    MatrixModel loaded(loadPort, 2, 8, 8);
+    assert(loaded.loadPreset(preset) == "bad slot");
+  }
+
+  // Non-crossover design/order are accepted for compatibility, then normalized
+  // through both paths so a later type change cannot revive hidden settings.
+  FakePort editPort;
+  MatrixModel edited(editPort, 2, 8, 8);
+  assert(addSlot(edited, "\"type\":\"phase\",\"design\":\"lr\",\"order\":8").empty());
+  DynamicJsonDocument doc(16384);
+  assert(!deserializeJson(doc, edited.savePreset()));
+  doc["outs"][1]["slots"][0]["design"] = "lr";
+  doc["outs"][1]["slots"][0]["order"] = 8;
+  std::string preset;
+  serializeJson(doc, preset);
+  FakePort loadPort;
+  MatrixModel loaded(loadPort, 2, 8, 8);
+  assert(loaded.loadPreset(preset).empty());
+  DynamicJsonDocument st = stateOf(loaded);
+  assert(!st["outs"][1]["slots"][0].containsKey("design"));
+  assert(!st["outs"][1]["slots"][0].containsKey("order"));
+}
+
 static void presetVersionIsBumpedAndOldOnesStillLoad()
 {
   FakePort port;
@@ -1327,6 +1383,7 @@ int main()
   typeChangeResetsHiddenDesignAndOrder();
   garbageDesignAndOrderAreNeverStored();
   presetSlotFieldsAreTypeChecked();
+  slotRulesAreTheSameForEditsAndPresets();
   presetVersionIsBumpedAndOldOnesStillLoad();
   undoRestoresTheLastAcceptedPatch();
   spdifOutDefaultsAndPairs();
