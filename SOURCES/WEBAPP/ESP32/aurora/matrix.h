@@ -13,7 +13,7 @@ bool isMatrixPlugin( void );
 
 /*! Creates the model from the plugin meta data and restores the stored master
  *  volume (the safe default if there is none). Call after readPluginMeta() and
- *  before uploadUserParams(), which writes the volume to the DSP. */
+ *  before setMasterVolume() writes the volume to the DSP in setup(). */
 void matrixInit( void );
 
 /*! Call after every master volume change (encoder or web); matrixLoop() stores
@@ -25,9 +25,11 @@ void matrixMasterVolumeChanged( void );
  *  DAC is still muted (in setup(), before resetDAC(false)). */
 void matrixWriteBaseline( void );
 
-/*! Loads the active preset (or the defaults if there is no file) and writes it to
- *  the DSP. Saves unsaved changes of the previously active preset first. Runs on
- *  the I2C worker (or in setup()); the DSP writes happen right away. */
+/*! Loads the active preset (or the defaults if there is no file) and writes only
+ *  the difference to the DSP, inside one shared gain ramp (MatrixModel::switchPreset);
+ *  no DAC mute, no legacy parameter upload. Saves unsaved changes of the previously
+ *  active preset first. Runs on the I2C worker (or in setup()); the DSP writes
+ *  happen right away. A switch calls it through applyPresetSwitch(). */
 void matrixLoadPreset( void );
 
 /*! Closes/reopens the live-edit gate around a Preset switch. Begin must happen

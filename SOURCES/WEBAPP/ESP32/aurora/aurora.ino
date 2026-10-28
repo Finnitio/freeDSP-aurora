@@ -646,8 +646,15 @@ void setup()
   //----------------------------------------------------------------------------
   //--- Upload user parameters to DSP
   //----------------------------------------------------------------------------
-  uploadUserParams();
-  matrixLoadPreset();
+  if( isMatrixPlugin() )
+  {
+    // The legacy upload would rewrite the Bus Sources and the SPDIF out behind the
+    // model's back; only the (global) master volume is needed from it.
+    setMasterVolume();
+    matrixLoadPreset();
+  }
+  else
+    uploadUserParams();
 
   //----------------------------------------------------------------------------
   //--- Configure Webserver
@@ -696,31 +703,32 @@ void setup()
  *
  */
 
-void update_preset(void) {
+/*! The one Preset switch of web (POST /preset) and rotary encoder. Runs on the
+ *  I2C worker, inside matrixBeginPresetSwitch()/matrixEndPresetSwitch().
+ *  Matrix Plugin: the difference inside one shared gain ramp, no DAC mute and no
+ *  legacy parameter upload (ADR 0003). Other Plugins: full upload under the DAC mute. */
+void applyPresetSwitch( uint8_t preset ) {
+  currentPreset = preset;
+  if( isMatrixPlugin() )
+  {
+    matrixLoadPreset();
+    updateAddOn();  // still unconditional and outside the ramp until ticket 04
+    return;
+  }
   softMuteDAC();
   initUserParams();
   uploadUserParams();
-  matrixLoadPreset();
   updateAddOn();
   softUnmuteDAC();
 }
 
 void next_preset(void) {
-  currentPreset++;
-  if( currentPreset >= MAX_NUM_PRESETS )
-    currentPreset = 0;
-
-  update_preset();
+  applyPresetSwitch( currentPreset + 1 >= MAX_NUM_PRESETS ? 0 : currentPreset + 1 );
   matrixEndPresetSwitch();
 }
 
 void prev_preset(void) {
-  if( currentPreset == 0 )
-    currentPreset = MAX_NUM_PRESETS - 1;
-  else
-    currentPreset--;
-
-  update_preset();
+  applyPresetSwitch( currentPreset == 0 ? MAX_NUM_PRESETS - 1 : currentPreset - 1 );
   matrixEndPresetSwitch();
 }
 

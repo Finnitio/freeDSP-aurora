@@ -31,6 +31,7 @@
 extern Display myDisplay;
 #endif
 extern void updateUI(void);
+extern void applyPresetSwitch( uint8_t preset );
 extern volatile bool apOpenFallback;
 extern volatile bool apUp;
 extern const char* apPasswordError;
@@ -1243,22 +1244,12 @@ void handlePostPresetJson( JsonObject root )
   #endif
 
 
-  softMuteDAC();
-
   Serial.println( root["pre"].as<String>() );
 
-  currentPreset = root["pre"].as<uint8_t>();
-
-  initUserParams();
-  uploadUserParams();
-  matrixLoadPreset();
-
-  updateAddOn();
-
+  applyPresetSwitch( root["pre"].as<uint8_t>() );
 
   updateUI();
 
-  softUnmuteDAC();
   matrixEndPresetSwitch();
 }
 
