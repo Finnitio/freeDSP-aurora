@@ -53,6 +53,10 @@ MatrixEditResult matrixImport( const std::string& json, int preset );
 /*! Export: the active Preset as a Preset file, including changes Autosave has not stored yet. */
 std::string matrixPresetJson( void );
 
+/*! Add-on B (SPDIF mux) config change from POST /addoncfg: written at once, without
+ *  DAC mute, and autosaved with the active Preset to /addoncfg.00N. Runs on the I2C worker. */
+MatrixEditResult matrixSetAddOn( uint8_t addr, uint8_t reg, uint8_t data );
+
 std::string matrixState( void );
 
 /*! Active biquad coefficients of one Channel (ch "bus" or "out") for the plot; "" if unknown. */

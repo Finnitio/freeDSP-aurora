@@ -14,6 +14,17 @@
 
 enum MatrixChannelKind { MATRIX_BUS, MATRIX_OUT };
 
+/*! Add-on B (SPDIF mux) I2C config of a Preset: one register write. set = false:
+ *  unknown / no Add-on B, nothing is written. */
+struct MatrixAddOn
+{
+  bool set;
+  uint8_t addr;  // 8-bit I2C address as stored in /addoncfg.00N (the 7-bit one is addr >> 1)
+  uint8_t reg, data;
+  bool operator==( const MatrixAddOn& o ) const { return set == o.set && addr == o.addr && reg == o.reg && data == o.data; }
+  bool operator!=( const MatrixAddOn& o ) const { return !( *this == o ); }
+};
+
 /*! Writes the model asks the DSP for. */
 struct MatrixPort
 {
@@ -34,6 +45,8 @@ struct MatrixPort
   /*! One biquad of a Channel (stage 0 = first). a[3], b[3] as made by the
    *  AudioFilterFactory (a[0] = 1, a1/a2 already negated for the DSP). */
   virtual void writeBiquad( MatrixChannelKind kind, int idx, int stage, const float a[3], const float b[3] ) = 0;
+  /*! The Add-on B config register write. */
+  virtual void writeAddOn( const MatrixAddOn& cfg ) = 0;
 };
 
 /*! Coefficients of one biquad as made by the AudioFilterFactory. */
@@ -105,6 +118,7 @@ public:
    *  type: "peq" (default), "hp", "lp", "lshelf", "hshelf", "phase"; HP/LP: design "bw" (order 1-8, default)
    *  or "lr" (order 2, 4, 8), default order 2; shelf slope 0.1-1.
    *  SPDIF out: {"ch":"spdif","sel":code} with the left code of one of the offered pairs (stateJson "spdifopts").
+   *  Add-on B config: {"ch":"addon","i2c":[addr, reg, data]} (bytes 0-255); written at once, no ramp.
    *  Linked aspects of a Link group: {"linkGroup":"bus"|"A".."D", "mute"|"filters"|"gain"|"delay":bool}
    *  ("bus" is the Buses' Link group, A..D the Outputs'). Buses cannot link delay. A Channel
    *  joining a Link group takes over its linked aspects, so a patch that joins cannot also set them.
@@ -154,9 +168,16 @@ public:
    *  to 0, one waitMs( MATRIX_RAMP_MS ), the difference, then every Channel of the ramp
    *  set that is audible after the load ramps up to its gain. Without a ramp-set Channel
    *  this is the plain difference, with no wait. switchPreset() returns "" or the reason;
-   *  on failure nothing is written and the model is untouched. */
-  std::string switchPreset( const std::string& json );
-  void switchToDefaults( void );
+   *  on failure nothing is written and the model is untouched.
+   *  addOn: the new Preset's Add-on B config; written (between the difference and the
+   *  ramp up) only if it differs from the current one. NULL or not set: keep the current one. */
+  std::string switchPreset( const std::string& json, const MatrixAddOn* addOn = NULL );
+  void switchToDefaults( const MatrixAddOn* addOn = NULL );
+
+  /*! The Add-on B config on the hardware, e.g. as written at boot; no write, not a change. */
+  void setAddOn( const MatrixAddOn& cfg ) { addOn_ = cfg; }
+  /*! The active Preset's Add-on B config, stored by Autosave next to the Preset. */
+  const MatrixAddOn& addOn( void ) const { return addOn_; }
 
   /*! Import of an exported Preset file into the active Preset: writes like switchPreset()
    *  and marks the model changed at nowMs, so Autosave stores it. preset is the Preset
@@ -237,9 +258,10 @@ private:
   bool needsRamp( const Channel& before, const Channel& after ) const;
   void snapshot( Snapshot& s ) const;
   void writeChanges( const Snapshot& before );
-  void writeDiff( const Snapshot& before, uint32_t spdifBefore, MatrixRampSet* ramp, bool shared );
-  std::string load( const std::string& json, MatrixRampSet* ramp, bool shared );
-  void resetTo( MatrixRampSet* ramp, bool shared );
+  void writeDiff( const Snapshot& before, uint32_t spdifBefore, MatrixRampSet* ramp, bool shared,
+                  const MatrixAddOn* addOn = NULL );
+  std::string load( const std::string& json, MatrixRampSet* ramp, bool shared, const MatrixAddOn* addOn = NULL );
+  void resetTo( MatrixRampSet* ramp, bool shared, const MatrixAddOn* addOn = NULL );
   void putChannel( JsonArray arr, const Channel& c, const char* selKey, bool withLimits ) const;
   std::string readChannel( JsonObject o, bool isBus, Channel& c ) const;
 
@@ -251,6 +273,7 @@ private:
   LinkGroup busLink_;
   LinkGroup outLink_[MATRIX_OUT_LINKS];
   uint32_t spdif_;  // left code of the SPDIF out pair
+  MatrixAddOn addOn_;
   bool dirty_;
   uint32_t lastChange_;
   bool presetSwitching_;
@@ -260,6 +283,7 @@ private:
   {
     bool valid;
     uint32_t spdif;
+    MatrixAddOn addOn;
     Channel bus[MATRIX_MAX_BUS];
     Channel out[MATRIX_MAX_OUT];
     LinkGroup busLink;

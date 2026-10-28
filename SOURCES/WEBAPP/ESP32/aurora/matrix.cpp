@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <SPIFFS.h>
+#include <Wire.h>
 #include <vector>
 
 #include "matrix.h"
@@ -8,10 +9,11 @@
 #include "adau1452.h"
 #include "i2cworker.h"
 #include "plugin.h"
+#include "addons.h"
 
 namespace
 {
-enum OpType { OP_GAIN, OP_ROUTE, OP_SOURCE, OP_BIQUAD, OP_POLARITY, OP_DELAY, OP_WAIT, OP_SPDIF };
+enum OpType { OP_GAIN, OP_ROUTE, OP_SOURCE, OP_BIQUAD, OP_POLARITY, OP_DELAY, OP_WAIT, OP_SPDIF, OP_ADDON };
 
 struct Op
 {
@@ -22,6 +24,7 @@ struct Op
   uint32_t sel;  // OP_ROUTE: route, OP_SOURCE: source code, OP_BIQUAD: stage, OP_POLARITY: 0/1, OP_DELAY: samples
   float a[3], b[3];  // OP_BIQUAD
   uint32_t sel2;     // OP_SPDIF: right code (sel = left code)
+  MatrixAddOn addOn;  // OP_ADDON
 };
 
 /*! Collects the model's writes; they are executed after the model call. */
@@ -36,6 +39,7 @@ public:
   void writeDelay( int out, int samples ) override { ops.push_back( { OP_DELAY, MATRIX_OUT, out, 0.0, (uint32_t)samples, {}, {} } ); }
   void waitMs( int ms ) override { ops.push_back( { OP_WAIT, MATRIX_OUT, 0, 0.0, (uint32_t)ms, {}, {} } ); }
   void writeSpdifOut( uint32_t left, uint32_t right ) override { ops.push_back( { OP_SPDIF, MATRIX_OUT, 0, 0.0, left, {}, {}, right } ); }
+  void writeAddOn( const MatrixAddOn& cfg ) override { ops.push_back( { OP_ADDON, MATRIX_OUT, 0, 0.0, 0, {}, {}, 0, cfg } ); }
   void writeBiquad( MatrixChannelKind kind, int idx, int stage, const float a[3], const float b[3] ) override
   {
     Op op = { OP_BIQUAD, kind, idx, 0.0, (uint32_t)stage, {}, {}, 0 };
@@ -88,6 +92,17 @@ void execOps( const std::vector<Op>& ops )
       spdifOutput.selectionRight = op.sel2;
       setSpdifOutputRouting();
     }
+    else if( op.type == OP_ADDON )
+    {
+      currentAddOnCfg[0] = op.addOn.addr;
+      currentAddOnCfg[1] = op.addOn.reg;
+      currentAddOnCfg[2] = op.addOn.data;
+      I2cLock lock;
+      Wire.beginTransmission( op.addOn.addr >> 1 );
+      Wire.write( op.addOn.reg );
+      Wire.write( op.addOn.data );
+      Wire.endTransmission( true );
+    }
     else if( op.type == OP_BIQUAD )
     {
       const uint16_t* base = ( op.kind == MATRIX_BUS ? matrixMeta.busbiquad : matrixMeta.outbiquad );
@@ -128,6 +143,44 @@ void writePresetFile( uint8_t preset, const std::string& json )
   f.write( (const uint8_t*)json.data(), json.size() );
   f.close();
 }
+/*! Add-on B config of a Preset from /addoncfg.00N; not set without Add-on B or a (whole) file. */
+MatrixAddOn readAddOnFile( uint8_t preset )
+{
+  MatrixAddOn cfg = MatrixAddOn();
+  if( Settings.addonid != ADDON_B )
+    return cfg;
+  File f = SPIFFS.open( presetAddonCfgFile[preset], "r" );
+  if( !f )
+    return cfg;
+  uint8_t v[3];
+  if( f.read( v, 3 ) == 3 )
+    cfg = { true, v[0], v[1], v[2] };
+  f.close();
+  return cfg;
+}
+
+void writeAddOnFile( uint8_t preset, const MatrixAddOn& cfg )
+{
+  if( !cfg.set )
+    return;
+  File f = SPIFFS.open( presetAddonCfgFile[preset], "w" );
+  if( !f )
+  {
+    Serial.println( F("[ERROR] matrix: cannot write add-on config file") );
+    return;
+  }
+  const uint8_t v[3] = { cfg.addr, cfg.reg, cfg.data };
+  f.write( v, 3 );
+  f.close();
+}
+
+/*! Autosave of a Preset: the matrix file and, with Add-on B, its config. */
+void savePreset( uint8_t preset, const std::string& json, const MatrixAddOn& addOn )
+{
+  writePresetFile( preset, json );
+  writeAddOnFile( preset, addOn );
+}
+
 float readMasterVolumeFile( void )
 {
   File f = SPIFFS.open( MASTER_VOLUME_FILE, "r" );
@@ -209,6 +262,8 @@ void matrixWriteBaseline( void )
     port.ops.clear();
     model->applyAll();  // the DSP program was just loaded: write everything, not the difference
     ops.swap( port.ops );
+    if( Settings.addonid == ADDON_B )  // updateAddOn() wrote it before the DSP program upload
+      model->setAddOn( { true, currentAddOnCfg[0], currentAddOnCfg[1], currentAddOnCfg[2] } );
   }
   execOps( ops );
 }
@@ -227,30 +282,36 @@ void matrixLoadPreset( void )
     f.close();
   }
 
+  const MatrixAddOn addOn = readAddOnFile( currentPreset );  // not set: keep the current config
+
   std::vector<Op> ops;
   std::string oldJson;  // changes of the previous preset that auto-save has not stored yet
+  MatrixAddOn oldAddOn;
   uint8_t oldPreset;
   {
     ModelLock lock;
     oldPreset = model->preset();
     if( model->dirty() && !keepStored )
+    {
       oldJson = model->savePreset();
+      oldAddOn = model->addOn();
+    }
     port.ops.clear();
     // only the difference, inside the shared ramp; a failed load writes nothing
-    std::string err = json.empty() ? "no preset file" : model->switchPreset( json );
+    std::string err = json.empty() ? "no preset file" : model->switchPreset( json, &addOn );
     keepStored = false;
     if( !err.empty() )
     {
       Serial.print( F("matrix: using defaults: ") );
       Serial.println( err.c_str() );
-      model->switchToDefaults();
+      model->switchToDefaults( &addOn );
       keepStored = !json.empty();  // an existing file stays as it is; edits are not auto-saved
     }
     model->setPreset( currentPreset );
     ops.swap( port.ops );
   }
   if( !oldJson.empty() )
-    writePresetFile( oldPreset, oldJson );
+    savePreset( oldPreset, oldJson, oldAddOn );
   execOps( ops );
 }
 
@@ -304,6 +365,29 @@ std::string matrixPresetJson( void )
   return model->savePreset();
 }
 
+MatrixEditResult matrixSetAddOn( uint8_t addr, uint8_t reg, uint8_t data )
+{
+  if( !model )
+    return { MATRIX_EDIT_BAD_REQUEST, "not a matrix plugin" };
+  StaticJsonDocument<128> doc;
+  JsonObject patch = doc.to<JsonObject>();
+  patch["ch"] = "addon";
+  JsonArray i2c = patch.createNestedArray( "i2c" );
+  i2c.add( addr );
+  i2c.add( reg );
+  i2c.add( data );
+  std::vector<Op> ops;
+  MatrixEditResult result;
+  {
+    ModelLock lock;
+    port.ops.clear();
+    result = model->apply( patch, millis() );
+    ops.swap( port.ops );
+  }
+  execOps( ops );  // already on the I2C worker
+  return result;
+}
+
 std::string matrixState( void )
 {
   if( !model )
@@ -327,7 +411,8 @@ void matrixLoop( void )
     return;
   std::string json = model->savePreset();
   int preset = model->preset();
+  MatrixAddOn addOn = model->addOn();
   // only a queued save counts as saved; otherwise it is retried on the next call
-  if( i2cPost( [json, preset]() { writePresetFile( preset, json ); } ) )
+  if( i2cPost( [json, preset, addOn]() { savePreset( preset, json, addOn ); } ) )
     model->markSaved();
 }
