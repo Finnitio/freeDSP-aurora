@@ -82,19 +82,20 @@ static inline ApPlan apPlan( const char* pwd, const char* name, int channel, con
 }
 
 //------------------------------------------------------------------------------
-/*! Bottom line of the display: the IP, or a warning while the AP runs open
- *  because the stored password is invalid. Fits 25 characters (5x7 font).
+/*! Bottom line of the display: the IP and whether the AP is up, or a warning
+ *  while the AP runs open because the stored password is invalid. Fits 25
+ *  characters (5x7 font).
  */
 static const size_t AP_STATUS_LINE_SIZE = 26;
 
-static inline void apStatusLine( char* line, size_t size, const char* ip, bool connected, bool openFallback )
+static inline void apStatusLine( char* line, size_t size, const char* ip, bool connected, bool openFallback, bool apUp )
 {
-  if( !openFallback )
-    snprintf( line, size, "%s", ip );
-  else if( connected )
+  if( openFallback && apUp && connected )
     snprintf( line, size, "OPEN AP! %s", ip );
-  else
+  else if( openFallback && apUp )
     snprintf( line, size, "OPEN AP: invalid password" );
+  else
+    snprintf( line, size, "%s, AP %s", ip, apUp ? "on" : "off" );
 }
 
 //------------------------------------------------------------------------------

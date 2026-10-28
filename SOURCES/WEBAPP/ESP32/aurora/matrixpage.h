@@ -35,6 +35,8 @@ button:disabled{opacity:.4}
 #wifi{position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(0,0,0,.6);overflow-y:auto;z-index:10}
 #wifi .box{box-sizing:border-box;max-width:400px;width:calc(100% - 16px);margin:40px auto;padding:8px 12px;background:#202020;border:1px solid #606060;border-radius:3px}
 #wifi input{box-sizing:border-box;width:100%;height:30px;margin-bottom:6px}
+#wifi input[type=checkbox]{width:auto;height:auto;margin:0 6px 0 0;vertical-align:middle}
+#wifi .check{display:block;margin-bottom:6px}
 #wifi .row button{flex:1 1 0;height:32px;border-top-width:1px}
 #apwarn{color:#ff6060;font-weight:bold}
 #wmsg,#smsg{min-height:18px}
@@ -69,6 +71,7 @@ button:disabled{opacity:.4}
 <div id="wstat"></div>
 <label for="ssid">Network name (SSID)</label><input type="text" id="ssid" maxlength="32" autocomplete="off" autocapitalize="none" spellcheck="false">
 <label for="pwd">Password (8-63 characters, empty: open network; the stored one is not shown)</label><input type="password" id="pwd" autocomplete="new-password">
+<label class="check"><input type="checkbox" id="apoff" onchange="storeApOff()">Switch the access point off while connected (the DSP is then only reachable on its WiFi IP; the access point comes back when the connection is lost)</label>
 <div id="smsg"></div>
 <div class="row"><button onclick="joinWifi()">Join network</button><button onclick="forgetWifi()">Forget network</button></div>
 <h2>Access point</h2>
@@ -345,7 +348,7 @@ function openWifi(){
   wifiEl("wifi").style.display="block";wsay("");ssay("");
   wifiEl("pwdap").value="";wifiEl("pwd").value="";  // stored passwords are never shown
   return fetch("/wificonfig").then(function(r){return r.json();}).then(function(d){
-    wifiEl("ssid").value=d.ssid;
+    wifiEl("ssid").value=d.ssid;wifiEl("apoff").checked=d.apoff===true;
     wifiEl("apname").value=d.apname;wifiEl("apchannel").value=d.apchannel;
     var w=wifiEl("apwarn");w.textContent=apWarningText(d);w.style.display=w.textContent?"block":"none";
     showWifiState(d);
@@ -354,8 +357,9 @@ function openWifi(){
 function closeWifi(){wifiEl("wifi").style.display="none";clearTimeout(wtimer);wtimer=null;}
 // Shows the connection state and keeps it fresh while the dialog is open; the inputs stay as typed.
 function showWifiState(d){
+  var ap=!d.apoff?"the access point stays available.":d.apup===false?"the access point is off while connected.":"the access point switches off shortly.";
   wifiEl("wstat").textContent=!d.ssid?"No WiFi network stored. The DSP is reachable on its access point."
-   :d.connected?"Connected to \""+d.ssid+"\", IP "+d.ip+". In that network the DSP is reachable at http://"+d.ip+"/; the access point stays available."
+   :d.connected?"Connected to \""+d.ssid+"\", IP "+d.ip+". In that network the DSP is reachable at http://"+d.ip+"/; "+ap
    :"Not connected to \""+d.ssid+"\". The DSP keeps trying; the access point stays available.";
   clearTimeout(wtimer);
   wtimer=wifiEl("wifi").style.display=="block"?setTimeout(refreshWifiState,3000):null;
@@ -399,7 +403,8 @@ function joinWifi(){
   if(!d.ssid)d.pwd="";
   var e=wifiCheck(d);
   if(e){ssay(e);return Promise.resolve();}
-  return postWifi(d,"Stored. The DSP now joins \""+d.ssid+"\". Once connected, it is reachable in that network on the IP shown above; the access point stays available.");
+  return postWifi(d,"Stored. The DSP now joins \""+d.ssid+"\". Once connected, it is reachable in that network on the IP shown above; the access point "
+   +(wifiEl("apoff").checked?"then switches off after 30 s.":"stays available."));
 }
 function forgetWifi(){
   wifiEl("ssid").value="";wifiEl("pwd").value="";
@@ -412,6 +417,21 @@ function postWifi(d,ok){
      if(r.ok){wifiEl("pwd").value="";ssay(ok);}
      else ssay("Not stored: "+t);});})
    .catch(function(){ssay("Not stored: no answer from the DSP");});
+}
+// "AP off while connected" (docs/adr 0005), applied at once; the same texts as sendApOff() in aurora.js.
+// 30 s = ApSwitch::GRACE_MS
+function storeApOff(){
+  var c=wifiEl("apoff").checked===true;
+  ssay("Storing...");
+  return fetch("/apoff",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({apoff:c})})
+   .then(function(r){return r.text().then(function(t){
+     if(r.ok)ssay(apOffText(c));
+     else{wifiEl("apoff").checked=!c;ssay("Not stored: "+t);}});})
+   .catch(function(){wifiEl("apoff").checked=!c;ssay("Not stored: no answer from the DSP");});
+}
+function apOffText(c){
+  return c?"Stored. The access point switches off 30 s after the DSP has joined its WiFi; the DSP is then only reachable on its WiFi IP. The access point comes back when the connection is lost."
+   :"Stored. The access point stays available.";
 }
 </script>
 </body>
