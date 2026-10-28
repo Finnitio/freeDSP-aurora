@@ -33,22 +33,24 @@ button:disabled{opacity:.4}
 .linkset b{flex:0 0 54px}
 .linkset button{width:auto;min-width:58px;height:28px;border-top-width:1px}
 .top{display:flex;align-items:center;justify-content:space-between;gap:8px}
-#wifi{position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(0,0,0,.6);overflow-y:auto;z-index:10}
-#wifi .box{box-sizing:border-box;max-width:400px;width:calc(100% - 16px);margin:40px auto;padding:8px 12px;background:#202020;border:1px solid #606060;border-radius:3px}
+#wifi,#abt{position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(0,0,0,.6);overflow-y:auto;z-index:10}
+#wifi .box,#abt .box{box-sizing:border-box;max-width:400px;width:calc(100% - 16px);margin:40px auto;padding:8px 12px;background:#202020;border:1px solid #606060;border-radius:3px}
 #wifi input{box-sizing:border-box;width:100%;height:30px;margin-bottom:6px}
 #wifi input[type=checkbox]{width:auto;height:auto;margin:0 6px 0 0;vertical-align:middle}
 #wifi .check{display:block;margin-bottom:6px}
-#wifi .row button{flex:1 1 0;height:32px;border-top-width:1px}
+#wifi .row button,#abt .row button{flex:1 1 0;height:32px;border-top-width:1px}
 #apwarn{color:#ff6060;font-weight:bold}
-#wmsg,#smsg{min-height:18px}
+#wmsg,#smsg,#tmsg{min-height:18px}
 #wstat{margin-bottom:6px;overflow-wrap:anywhere}
+#abt{background:#181818}  /* opaque: the active Preset letter must not show through */
+#trounds{width:76px;height:30px}
 </style>
 </head>
 <body onload="load()">
 <div class="top"><h1>Aurora DSP</h1><button class="mute" onclick="openWifi()">WiFi</button></div>
 <div id="msg"></div>
 <div id="main">
-<div class="row"><div id="presets" class="row" style="margin:0"></div><a id="export" class="file" href="/preset.param" download>Export</a><label class="file">Import<input type="file" accept=".json,application/json" onchange="importFile(this)" hidden></label></div>
+<div class="row"><div id="presets" class="row" style="margin:0"></div><a id="export" class="file" href="/preset.param" download>Export</a><label class="file">Import<input type="file" accept=".json,application/json" onchange="importFile(this)" hidden></label><button class="mute" title="A/B test: compare Presets blind" onclick="abOpen()">Test</button></div>
 <div class="row"><span class="lbl">Vol</span><input type="range" id="vol" class="gain" min="-80" max="0" step="0.5" value="-60" oninput="sendVol(this.value)"><span class="gv" id="volv"></span></div>
 <h2>Buses</h2>
 <div id="buslinks"></div>
@@ -83,10 +85,26 @@ button:disabled{opacity:.4}
 <div id="wmsg"></div>
 <div class="row"><button onclick="storeAp()">Store AP config</button><button onclick="closeWifi()">Close</button></div>
 </div></div>
+<div id="abt" style="display:none"><div class="box">
+<h2>A/B test</h2>
+<div class="row"><span class="lbl">Vol</span><input type="range" id="tvol" class="gain" min="-80" max="0" step="0.5" value="-60" oninput="sendVol(this.value)"><span class="gv" id="tvolv"></span></div>
+<div id="tmsg"></div>
+<div id="tset">
+<p>Tick 2 to 4 Presets. Each Round plays them behind the labels 1-4 in a new order; pick the one you like best.</p>
+<div id="tpre" class="row"></div>
+<label for="trounds">Rounds (3-50)</label><input type="number" id="trounds" min="3" max="50" value="10" inputmode="numeric">
+<div class="row"><button id="tstart" onclick="abStart()">Start</button><button onclick="abClose()">Cancel</button></div>
+</div>
+<div id="trun" style="display:none">
+<h2 id="tround"></h2>
+<div id="tlabels" class="row"></div>
+<div class="row"><button id="tvote" onclick="abVote()">This one is best</button><button onclick="abEnd()">Abort</button></div>
+<p>Reloading the page ends the test without switching back to the previous Preset.</p>
+</div></div></div>
 <script>
 var st=null,seq=0,seen=0,late=false,view=null,cf=null,cseq=0,csig="",ct=0,activePreset=-1;
 var presetUsed=[];  // per Preset slot: has a Preset file (GET /preset "used")
-function say(t){document.getElementById("msg").textContent=t||"";}
+function say(t){document.getElementById("msg").textContent=document.getElementById("tmsg").textContent=t||"";}  // tmsg: the Preset test overlay
 function waitIdle(){return fetch("/idle").then(function(r){return r.text();}).then(function(t){
   if(t=="1")return;return new Promise(function(r){setTimeout(r,100);}).then(waitIdle);});}
 // Settles once the matrix and the master volume have been read (or failed to).
@@ -99,8 +117,8 @@ function load(){
    fetch("/mvol").then(function(r){return r.json();}).then(function(v){if(!vt)showVol(v.vol);}).catch(function(){})]);  // not under a drag
 }
 function showVol(v){
-  document.getElementById("vol").value=v;
-  document.getElementById("volv").textContent=parseFloat(v).toFixed(1)+" dB";
+  document.getElementById("vol").value=document.getElementById("tvol").value=v;  // tvol: the Preset test overlay
+  document.getElementById("volv").textContent=document.getElementById("tvolv").textContent=parseFloat(v).toFixed(1)+" dB";
 }
 // The master volume is global, not part of a Preset: it is sent during a Preset switch too.
 var vt=0,vp=null;
@@ -112,17 +130,17 @@ function sendVol(v){  // while dragging: at once, then at most every 100 ms with
   go();
 }
 function drawPresets(cur){
-  var h="";for(var i=0;i<4;i++)h+="<button class='"+(i==cur?"on":"")+"' onclick='preset("+i+")'>"+"ABCD"[i]+"</button>";
+  var h="";for(var i=0;i<4;i++)h+="<button class='"+(i==cur?"on":"")+"' onclick='if(!ab)preset("+i+")'>"+"ABCD"[i]+"</button>";
   document.getElementById("presets").innerHTML=h;
 }
 // From the click until the state has been reloaded no Preset edit is sent: edits made meanwhile
-// are dropped rather than sent to the new Preset.
+// are dropped rather than sent to the new Preset. Settles once that is over (the Preset test chains on it).
 var switching=false;
 function preset(p){
-  if(switching)return;
+  if(switching)return Promise.resolve();
   switching=true;
   say("Switching preset...");
-  fetch("/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pre:p})})
+  return fetch("/preset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pre:p})})
    .then(function(r){return r.text().then(function(t){if(!r.ok)throw new Error(t||"Preset switch failed");});})
    .then(waitIdle).then(function(){say("");},function(e){say(e.message);})
    .then(load).then(function(){switching=false;});
@@ -134,7 +152,7 @@ function importFile(el){
   if(f)f.text().then(importPreset,function(){say("Import failed: cannot read the file");});
 }
 function importPreset(text){
-  if(switching)return;
+  if(switching||ab)return;
   switching=true;
   say("Importing preset...");
   fetch("/matrix/import?preset="+activePreset,{method:"POST",headers:{"Content-Type":"application/json"},body:text})
@@ -151,7 +169,7 @@ function send(ch,idx,f){
   return post(p);
 }
 function post(p){
-  if(switching)return Promise.resolve();
+  if(switching||ab)return Promise.resolve();  // ab: no edit during a Preset test
   var n=++seq;  // replies older than one already shown are ignored
   return fetch("/matrix",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)})
    .then(function(r){return r.text().then(function(t){
@@ -176,7 +194,7 @@ function fieldKey(e,el){
 // Text that is no number is sent as null: the firmware's reply names the problem and the field reverts.
 function commit(el){
   var d=el.dataset,x=num(el.value);
-  if(switching){el.value=d.v;return;}  // dropped; the reload shows the loaded value
+  if(switching||ab){el.value=d.v;return;}  // dropped; the reload shows the loaded value
   if(el.value==d.v||x===num(d.v))return;
   d.v=el.value;  // until the reply: Enter followed by Tab sends once
   var i=parseInt(d.i),f={};
@@ -388,6 +406,69 @@ function verdict(counts){
   var w=n&&lead==1?counts.indexOf(top):-1;
   p=n<3?null:exactP(counts);
   return {winner:w,p:p,sig:w>=0&&p!==null&&p<0.05};
+}
+
+// ---- Preset test ("A/B test"): the ticked Presets play behind labels 1..k, reshuffled every Round.
+// Client only: a reload ends the test without switching back.
+function abEl(id){return document.getElementById(id);}
+var abSel=[];  // ticked Preset slots in the setup dialog
+function abShow(setup){abEl("abt").style.display="block";abEl("tset").style.display=setup?"":"none";abEl("trun").style.display=setup?"none":"";}
+function abOpen(){if(ab)return;abSel=[];say("");showVol(abEl("vol").value);abEl("trounds").value=10;abShow(true);abTicks();}
+function abTicks(){
+  var h="";for(var i=0;i<4;i++)h+="<button class='"+(abSel.indexOf(i)<0?"":"on")+"'"+(presetUsed[i]?"":" disabled")+" onclick='abTick("+i+")'>"+"ABCD"[i]+"</button>";
+  abEl("tpre").innerHTML=h;abEl("tstart").disabled=abSel.length<2;
+}
+function abTick(i){var j=abSel.indexOf(i);if(j<0)abSel.push(i);else abSel.splice(j,1);abTicks();}
+function abClose(){abEl("abt").style.display="none";}
+// The running test, null otherwise: pre = ticked slots (ascending), n = Rounds, votes = per Round the
+// index into pre of the chosen Preset, order = label -> index into pre, cur = label playing (-1: none
+// yet this Round), back = Preset to switch back to, sw = the last switch (the switch back waits for it).
+// While it runs the overlay covers the page and post() sends no edit, so Autosave cannot write into a
+// Preset under test; only the Master volume (not part of a Preset) stays usable.
+var ab=null;
+function abStart(){
+  if(abSel.length<2||switching)return;
+  var n=Math.max(3,Math.min(50,parseInt(abEl("trounds").value)||10));
+  ab={pre:abSel.slice().sort(),n:n,votes:[],order:[],cur:-1,back:activePreset};
+  abShow(false);abEl("tround").textContent="Waiting for the DSP...";abEl("tlabels").innerHTML="";abEl("tvote").disabled=true;
+  var t=ab;
+  t.sw=waitIdle().then(function(){t.back=activePreset;if(!t.end)abRound();});  // Autosave done, the active Preset settled
+}
+function shuffle(a){  // Fisher-Yates
+  for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),x=a[i];a[i]=a[j];a[j]=x;}
+  return a;
+}
+function abRound(){ab.order=shuffle(ab.pre.map(function(p,i){return i;}));ab.cur=-1;abDraw();}
+function abDraw(){
+  abEl("tround").textContent="Round "+(ab.votes.length+1)+"/"+ab.n;
+  abEl("tlabels").innerHTML=ab.order.map(function(x,i){
+    return "<button class='"+(i==ab.cur?"on":"")+"' onclick='abPick("+i+")'>"+(i+1)+"</button>";}).join("");
+  abEl("tvote").disabled=ab.cur<0;
+}
+// A label plays the Preset behind it through the normal switch; it is current only once that has loaded.
+function abPick(i){
+  if(!ab||ab.end||switching)return;
+  var t=ab,r=t.votes.length,p=t.pre[t.order[i]];
+  t.cur=-1;abDraw();
+  t.sw=preset(p).then(function(){if(!t.end&&t.votes.length==r&&activePreset==p){t.cur=i;abDraw();}});
+}
+function abVote(){
+  if(!ab||ab.end||ab.cur<0||switching)return;
+  ab.votes.push(ab.order[ab.cur]);
+  if(ab.votes.length<ab.n)abRound();else abEnd();
+}
+// Last Round or Abort: switch back to the remembered Preset, then hand the Votes to the Evaluation.
+function abEnd(){
+  var t=ab;if(!t||t.end)return;
+  t.end=true;abEl("tround").textContent="Switching back...";abEl("tlabels").innerHTML="";abEl("tvote").disabled=true;
+  t.sw.then(function(){return preset(t.back);}).then(function(){ab=null;abClose();abResult(t.pre,t.votes);});
+}
+// Hand-off to the Evaluation: pre = the ticked Preset slots (0-3 = A-D, ascending), votes = per Round
+// the index into pre of the chosen Preset (tally(votes,pre.length)). No Votes: nothing to show.
+function abResult(pre,votes){
+  if(!votes.length)return;
+  var c=tally(votes,pre.length).counts;
+  say("A/B test Votes: "+pre.map(function(p,i){return "ABCD"[p]+" "+c[i];}).join(", "));
 }
 
 // ---- WiFi dialog: the same checks, messages and open-AP warning as the settings UI (aurora.js)

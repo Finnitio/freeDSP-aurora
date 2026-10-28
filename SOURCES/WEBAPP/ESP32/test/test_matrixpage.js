@@ -133,6 +133,7 @@ async function main() {
   await switchTests();
   await exportImportTests();
   await presetUsedTests();
+  await presetTestTests();
   console.log("matrix page tests passed");
 }
 
@@ -565,6 +566,163 @@ async function presetUsedTests() {
   for (let i = 0; i < 10; i++) await flush();
   assert.deepStrictEqual(Array.from(context.presetUsed), [true, true, false, true],
     "load() stores which Preset slots have a file");
+}
+
+// ---- Preset test ("A/B test"): setup, blind Rounds, Votes, lock, switch back.
+// The buttons the page rendered into a holder, clicked as a browser would.
+function buttons(id) {
+  return [...element(id).innerHTML.matchAll(/<button\b([^>]*)>(.*?)<\/button>/g)]
+    .map((m) => ({ text: m[2], disabled: /\bdisabled\b/.test(m[1]), on: /class='[^']*\bon\b/.test(m[1]),
+      click: handler(attrs(m[1]).onclick) }));
+}
+function click(id, text) {
+  const b = buttons(id).find((x) => x.text == text);
+  assert(b && !b.disabled, "button " + text + " in #" + id + " is clickable");
+  b.click({});
+}
+async function presetTestTests() {
+  // Setup: Preset C has no file, so it cannot be ticked; Start needs 2-4 ticks.
+  context.presetUsed = [true, true, false, true];
+  context.activePreset = 1;
+  context.abOpen();
+  assert.strictEqual(element("abt").style.display, "block", "the setup dialog covers the page");
+  assert.deepStrictEqual(buttons("tpre").map((b) => [b.text, b.disabled]),
+    [["A", false], ["B", false], ["C", true], ["D", false]], "an empty slot cannot be ticked");
+  assert(element("tstart").disabled, "Start is disabled with no tick");
+  click("tpre", "A");
+  assert(element("tstart").disabled, "Start is disabled with 1 tick");
+  click("tpre", "B");
+  assert(!element("tstart").disabled, "Start is enabled with 2 ticks");
+  click("tpre", "B");
+  assert(element("tstart").disabled, "a second click unticks");
+  click("tpre", "B");
+  click("tpre", "D");
+  assert(!element("tstart").disabled, "Start is enabled with 3 ticks");
+
+  // The DSP: POST /preset switches (a slot listed in fail is refused), GET /matrix reports it.
+  const sent = [], ended = [];
+  let state = sample(), fail = -1, held = null;
+  state.preset = 1;
+  const res = (ok, status, text) => ({ ok, status, text: () => Promise.resolve(text), json: () => Promise.resolve(JSON.parse(text)) });
+  context.fetch = (url, options) => {
+    if (options && options.method == "POST") {
+      const body = JSON.parse(options.body);
+      sent.push({ url, body });
+      if (url != "/preset") return Promise.resolve(res(true, 200, JSON.stringify(state)));
+      if (body.pre == fail) return Promise.resolve(res(false, 409, "preset switch in progress"));
+      const done = () => { state.preset = body.pre; return res(true, 200, ""); };
+      if (held === true) return new Promise((r) => { held = () => r(done()); });
+      return Promise.resolve(done());
+    }
+    if (url == "/idle") return Promise.resolve(res(true, 200, "1"));
+    if (url == "/matrix") return Promise.resolve(res(true, 200, JSON.stringify(state)));
+    if (url == "/mvol") return Promise.resolve(res(true, 200, JSON.stringify({ vol: -30 })));
+    return Promise.resolve(res(true, 200, JSON.stringify({ pre: state.preset, used: [true, true, false, true] })));
+  };
+  context.setTimeout = setTimeout;
+  context.clearTimeout = clearTimeout;
+  context.abResult = (pre, votes) => ended.push({ pre: Array.from(pre), votes: Array.from(votes), at: sent.length });
+  const settle = async () => { for (let i = 0; i < 20; i++) await flush(); };
+  const switches = () => sent.filter((x) => x.url == "/preset").map((x) => x.body.pre);
+  // Clicks every label of the current Round and returns the Preset slot behind each.
+  const reveal = async () => {
+    const behind = [];
+    for (const b of buttons("tlabels")) {
+      sent.length = 0;
+      click("tlabels", b.text);
+      await settle();
+      behind.push(switches()[0]);
+    }
+    return behind;
+  };
+  const vote = async (slot, behind) => {  // listen to the label that hides slot, then vote
+    click("tlabels", String(behind.indexOf(slot) + 1));
+    await settle();
+    assert(buttons("tlabels")[behind.indexOf(slot)].on, "the current label is marked");
+    assert(!element("tvote").disabled, "a Vote can be cast for the current label");
+    context.abVote();
+    await settle();
+  };
+
+  element("trounds").value = "3";
+  context.abStart();
+  await settle();
+  assert.strictEqual(element("trun").style.display, "", "the Rounds are shown");
+  assert.strictEqual(element("tround").textContent, "Round 1/3");
+  assert.deepStrictEqual(buttons("tlabels").map((b) => b.text), ["1", "2", "3"],
+    "the ticked Presets appear only as anonymous labels");
+  assert(element("tvote").disabled, "no Vote before a label has been listened to");
+
+  // Edits are blocked; the Master volume still works.
+  sent.length = 0;
+  context.send("out", 0, { mute: true });
+  context.sendVol("-31");
+  await settle();
+  assert.deepStrictEqual(sent.map((x) => x.url), ["/mvol"], "no edit during the test, only the volume");
+
+  // Round 1: every label plays one of the ticked Presets, each exactly once.
+  let behind = await reveal();
+  assert.deepStrictEqual([...behind].sort(), [0, 1, 3], "the labels are a permutation of the ticked Presets");
+  await vote(3, behind);
+  assert.strictEqual(element("tround").textContent, "Round 2/3");
+  assert(element("tvote").disabled, "a new Round starts with no current label");
+
+  // Round 2: a refused switch shows its message, the test goes on. Label 1 is refused: the Preset
+  // behind it is not the one playing (reveal() ended on label 3).
+  behind = await reveal();
+  fail = behind[0];
+  sent.length = 0;
+  click("tlabels", "1");
+  await settle();
+  assert.strictEqual(element("tmsg").textContent, "preset switch in progress", "the failure is shown in the test");
+  assert(element("tvote").disabled, "no Vote for a label that did not play");
+  fail = -1;
+  await vote(0, behind);
+
+  // Round 3, the last: the Vote ends the test; the remembered Preset B is switched back last.
+  behind = await reveal();
+  sent.length = 0;
+  await vote(3, behind);
+  assert.deepStrictEqual(switches(), [3, 1], "the original Preset is switched back after the last Vote");
+  assert.strictEqual(context.activePreset, 1);
+  assert.strictEqual(element("abt").style.display, "none", "the overlay is gone after the test");
+  assert.deepStrictEqual(ended, [{ pre: [0, 1, 3], votes: [2, 0, 2], at: sent.length }],
+    "the Votes (indices into the ticked Presets) go to the Evaluation after the switch back");
+  sent.length = 0;
+  context.send("out", 0, { mute: true });
+  await settle();
+  assert.deepStrictEqual(sent.map((x) => x.url), ["/matrix"], "edits work again after the test");
+
+  // Abort during a switch: the switch back waits for it and is still sent last.
+  ended.length = 0;
+  context.abOpen();
+  click("tpre", "A");
+  click("tpre", "D");
+  context.abStart();
+  await settle();
+  behind = await reveal();
+  await vote(0, behind);
+  sent.length = 0;
+  held = true;
+  click("tlabels", "1");
+  context.abEnd();
+  await settle();
+  held();
+  held = null;
+  await settle();
+  assert.strictEqual(switches().length, 2);
+  assert.strictEqual(switches()[1], 1, "the original Preset is switched back last after an abort");
+  assert.strictEqual(context.activePreset, 1);
+  assert.deepStrictEqual(ended.map((e) => [e.pre, e.votes]), [[[0, 3], [0]]], "an abort hands over the Votes so far");
+
+  // Every shuffle is a permutation, and every label gets every Preset over many Rounds.
+  const seen = [new Set(), new Set(), new Set()];
+  for (let i = 0; i < 200; i++) {
+    const s = Array.from(context.shuffle([0, 1, 2]));
+    assert.deepStrictEqual([...s].sort(), [0, 1, 2], "a shuffle is a permutation");
+    s.forEach((v, j) => seen[j].add(v));
+  }
+  assert(seen.every((x) => x.size == 3), "the labels are reshuffled");
 }
 
 // Evaluation statistics of a Preset test: exact multinomial test against equal liking.
