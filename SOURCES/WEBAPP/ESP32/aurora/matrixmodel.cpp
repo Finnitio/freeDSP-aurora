@@ -255,21 +255,6 @@ void MatrixModel::stages( const Channel& c, std::vector<Coef>& out ) const
   }
 }
 
-/*! True if a Slot was added or deleted or changed type, design or order: then Slots may sit on
- *  other biquads than before. Parameter and bypass edits keep every Slot on its biquads. */
-bool MatrixModel::layoutChanged( const Channel& before, const Channel& after )
-{
-  if( after.slots.size() != before.slots.size() )
-    return true;
-  for( size_t i = 0; i < after.slots.size(); i++ )
-  {
-    const Slot& a = after.slots[i]; const Slot& b = before.slots[i];
-    if( a.type != b.type || a.lr != b.lr || a.order != b.order )
-      return true;
-  }
-  return false;
-}
-
 /*! Writes the biquads that differ from prev (all of them if prev is NULL). */
 void MatrixModel::writeStages( MatrixChannelKind kind, int idx, const Channel& c, const Channel* prev )
 {
@@ -282,20 +267,17 @@ void MatrixModel::writeStages( MatrixChannelKind kind, int idx, const Channel& c
       port_.writeBiquad( kind, idx, s, now[s].a, now[s].b );
 }
 
-/*! True if the edit lets the Channel briefly run a mix of old and new Slots: the layout
- *  changed and more than one biquad is rewritten. Parameter edits are safeloaded live. */
+/*! True if the edit rewrites any biquad: a new coefficient on running filter state can click,
+ *  and a multi-biquad rewrite would briefly run a mix of old and new Slots (spec 37). */
 bool MatrixModel::needsRamp( const Channel& before, const Channel& after ) const
 {
-  if( !layoutChanged( before, after ) )
-    return false;
   std::vector<Coef> was, now;
   stages( before, was );
   stages( after, now );
-  int changed = 0;
   for( int s = 0; s < nbiquad_; s++ )
     if( memcmp( &was[s], &now[s], sizeof( Coef ) ) != 0 )
-      changed++;
-  return changed > 1;
+      return true;
+  return false;
 }
 
 /*! Slot edit of a patch; changes only c, and only if it returns "". */
@@ -457,8 +439,8 @@ double MatrixModel::linear( const Channel& c ) const
   return c.mute ? 0.0 : c.gainBypass ? 1.0 : pow( 10.0, c.gain / 20.0 );
 }
 
-/*! Writes what differs from the snapshot. Channels that switch their route or Source, or change
- *  their Slot layout, ramp together: all down, one wait, every write, all up. */
+/*! Writes what differs from the snapshot. Channels that switch their route or Source, or rewrite
+ *  any biquad, ramp together: all down, one wait, every write, all up. */
 void MatrixModel::writeChanges( const Snapshot& before )
 {
   bool ramp[MATRIX_MAX_BUS + MATRIX_MAX_OUT];
