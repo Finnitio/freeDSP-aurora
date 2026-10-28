@@ -422,7 +422,7 @@ function postWifi(d,ok){
    .catch(function(){ssay("Not stored: no answer from the DSP");});
 }
 // "AP off while connected", applied at once; the same texts as sendApOff() in aurora.js.
-// 30 s = ApSwitch::GRACE_MS
+// 30 s here and in joinWifi() = ApSwitch::GRACE_MS (checked by test_matrixwifi.js)
 function storeApOff(){
   var c=wifiEl("apoff").checked===true;
   ssay("Storing...");

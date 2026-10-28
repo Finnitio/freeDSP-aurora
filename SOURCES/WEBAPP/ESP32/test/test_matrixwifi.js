@@ -278,8 +278,12 @@ async function refreshesConnectionWhileOpen() {
   assert.strictEqual(p.tick(), 0, "no refresh once the dialog is closed");
 }
 
-// "AP off while connected": the same texts in the matrix page and the settings UI.
-const APOFF_ON = "Stored. The access point switches off 30 s after the DSP has joined its WiFi; the DSP is then only reachable on its WiFi IP. The access point comes back when the connection is lost.";
+// "AP off while connected": the same texts in the matrix page and the settings UI. The grace
+// time in them is the firmware's, so changing ApSwitch::GRACE_MS without the texts fails here.
+const GRACE_MS = Number(fs.readFileSync("SOURCES/WEBAPP/ESP32/aurora/apswitch.h", "utf8")
+  .match(/GRACE_MS\s*=\s*(\d+)/)[1]);
+const GRACE = GRACE_MS / 1000 + " s";
+const APOFF_ON = "Stored. The access point switches off " + GRACE + " after the DSP has joined its WiFi; the DSP is then only reachable on its WiFi IP. The access point comes back when the connection is lost.";
 const APOFF_OFF = "Stored. The access point stays available.";
 
 async function showsStoredApOffSetting() {
@@ -354,7 +358,7 @@ async function joinNoteMentionsTheApGoingOff() {
   await p.context.joinWifi();
   assert.deepStrictEqual(JSON.parse(p.requests[0].options.body), { ssid: "home", pwd: "secret123" });
   assert.strictEqual(p.elements.smsg.textContent,
-    "Stored. The DSP now joins \"home\". Once connected, it is reachable in that network on the IP shown above; the access point then switches off after 30 s.");
+    "Stored. The DSP now joins \"home\". Once connected, it is reachable in that network on the IP shown above; the access point then switches off after " + GRACE + ".");
 }
 
 async function main() {

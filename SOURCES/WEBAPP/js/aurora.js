@@ -240,7 +240,7 @@ function sendWifi(){
   .catch(function(err){console.log(err);});
 }
 
-// "AP off while connected", applied at once. 30 s = ApSwitch::GRACE_MS
+// "AP off while connected", applied at once. 30 s = ApSwitch::GRACE_MS (checked by test_matrixwifi.js)
 function sendApOff(){
   var box=document.getElementById("apoff");
   var data={apoff:box.checked===true};

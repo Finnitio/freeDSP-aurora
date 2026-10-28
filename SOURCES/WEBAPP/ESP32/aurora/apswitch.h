@@ -21,6 +21,7 @@ public:
 
   //! Time to read the WiFi IP (shown on the display and in the WiFi dialog)
   //! before the AP goes away.
+  //! The WiFi dialogs name it in their texts (test_matrixwifi.js checks they match).
   static const uint32_t GRACE_MS = 30000;
 
   //----------------------------------------------------------------------------
