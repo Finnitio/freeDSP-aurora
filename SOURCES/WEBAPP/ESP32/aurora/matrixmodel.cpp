@@ -427,7 +427,7 @@ void MatrixModel::reset( void )
     out_[o].polarity = false;
     out_[o].delay = 0;
     out_[o].delayBypass = false;
-    out_[o].sel = o % 2;
+    out_[o].sel = 0;  // Bus 1
     out_[o].link = -1;
     out_[o].slots.clear();
   }
