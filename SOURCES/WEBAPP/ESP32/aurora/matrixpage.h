@@ -442,7 +442,8 @@ function abStart(){
   ab={pre:abSel.slice().sort(),n:n,votes:[],order:[],cur:-1,back:activePreset};
   abShow("trun");abEl("tround").textContent="Waiting for the DSP...";abEl("tlabels").innerHTML="";abEl("tvote").disabled=true;
   var t=ab;
-  t.sw=waitIdle().then(function(){t.back=activePreset;if(!t.end)abRound();});  // Autosave done, the active Preset settled
+  t.sw=waitIdle().then(function(){t.back=activePreset;if(!t.end)abRound();});  // the DSP is idle, the active Preset settled
+  // An edit Autosave has not stored yet is not lost: POST /preset saves the old Preset first (ADR 0003).
 }
 function shuffle(a){  // Fisher-Yates
   for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),x=a[i];a[i]=a[j];a[j]=x;}
