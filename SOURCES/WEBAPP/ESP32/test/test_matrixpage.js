@@ -132,6 +132,7 @@ async function main() {
   await commitTests();
   await switchTests();
   await exportImportTests();
+  await presetUsedTests();
   console.log("matrix page tests passed");
 }
 
@@ -550,6 +551,20 @@ async function exportImportTests() {
   await settle();
   assert.deepStrictEqual(sent, []);
   assert(/^Import failed/.test(els.msg.textContent), "an unreadable file is reported");
+}
+
+// ---- GET /preset says which slots have a Preset file; load() keeps it for the Preset test.
+async function presetUsedTests() {
+  const res = (text) => ({ ok: true, status: 200, text: () => Promise.resolve(text), json: () => Promise.resolve(JSON.parse(text)) });
+  context.fetch = (url) => {
+    if (url == "/preset") return Promise.resolve(res(JSON.stringify({ pre: 1, used: [true, true, false, true] })));
+    if (url == "/matrix") return Promise.resolve(res(JSON.stringify(sample())));
+    return Promise.resolve(res(JSON.stringify({ vol: -20 })));
+  };
+  await context.load();
+  for (let i = 0; i < 10; i++) await flush();
+  assert.deepStrictEqual(Array.from(context.presetUsed), [true, true, false, true],
+    "load() stores which Preset slots have a file");
 }
 
 main().catch((error) => {

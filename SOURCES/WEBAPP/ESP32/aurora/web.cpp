@@ -22,6 +22,7 @@
 #include "plugin.h"
 #include "inputrouting.h"
 #include "i2cworker.h"
+#include "presetslots.h"
 #include "bodybuffer.h"
 #include "apconfig.h"
 #include "matrix.h"
@@ -503,8 +504,8 @@ void handleGetPresetJson( AsyncWebServerRequest* request )
   Serial.println(F("GET /preset"));
   #endif
   AsyncJsonResponse* response = new AsyncJsonResponse();
-  JsonVariant& jsonResponse = response->getRoot();
-  jsonResponse["pre"] = currentPreset;
+  presetSlotsJson( response->getRoot(), currentPreset,
+                   []( const std::string& path ) { return SPIFFS.exists( path.c_str() ); } );
   response->setLength();
   request->send(response);
 }

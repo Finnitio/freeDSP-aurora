@@ -9,6 +9,7 @@
 #include "i2cworker.h"
 #include "plugin.h"
 #include "addons.h"
+#include "presetslots.h"
 
 namespace
 {
@@ -118,7 +119,7 @@ void execOps( const std::vector<Op>& ops )
 
 String presetFile( uint8_t preset )
 {
-  return String( "/matrix.00" ) + String( preset + 1 ) + String( ".json" );
+  return String( matrixPresetFileName( preset ).c_str() );
 }
 
 void writePresetFile( uint8_t preset, const std::string& json )

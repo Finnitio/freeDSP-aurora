@@ -1,0 +1,32 @@
+#ifndef PRESETSLOTS_H_
+#define PRESETSLOTS_H_
+
+#include <stdint.h>
+#include <string>
+#include <ArduinoJson.h>
+#include "config.h"
+
+//==============================================================================
+/*! Path of the matrix Preset file of slot `preset` (0-based): /matrix.001.json
+ *  for slot A. Pure logic, so it can be tested on the host.
+ */
+inline std::string matrixPresetFileName( uint8_t preset )
+{
+  return std::string( "/matrix.00" ) + (char)( '1' + preset ) + ".json";  // NUMPRESETS < 10; no std::to_string on the ESP32 core
+}
+
+//==============================================================================
+/*! Body of GET /preset: "pre" the active slot, "used" per slot whether its
+ *  matrix Preset file exists. exists( const std::string& path ) asks the file
+ *  system (SPIFFS on the device).
+ */
+template <class Exists>
+void presetSlotsJson( JsonVariant root, int pre, Exists exists )
+{
+  root["pre"] = pre;
+  JsonArray used = root.createNestedArray( "used" );
+  for( uint8_t ii = 0; ii < NUMPRESETS; ii++ )
+    used.add( (bool)exists( matrixPresetFileName( ii ) ) );
+}
+
+#endif

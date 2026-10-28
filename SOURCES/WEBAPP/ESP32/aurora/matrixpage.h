@@ -85,13 +85,14 @@ button:disabled{opacity:.4}
 </div></div>
 <script>
 var st=null,seq=0,seen=0,late=false,view=null,cf=null,cseq=0,csig="",ct=0,activePreset=-1;
+var presetUsed=[];  // per Preset slot: has a Preset file (GET /preset "used")
 function say(t){document.getElementById("msg").textContent=t||"";}
 function waitIdle(){return fetch("/idle").then(function(r){return r.text();}).then(function(t){
   if(t=="1")return;return new Promise(function(r){setTimeout(r,100);}).then(waitIdle);});}
 // Settles once the matrix and the master volume have been read (or failed to).
 function load(){
   var n=++seq;
-  fetch("/preset").then(function(r){return r.json();}).then(function(p){drawPresets(p.pre);});
+  fetch("/preset").then(function(r){return r.json();}).then(function(p){presetUsed=p.used||[];drawPresets(p.pre);});
   return Promise.all([
    fetch("/matrix").then(function(r){return r.json();}).then(function(s){if(n<seen)return;seen=n;st=s;activePreset=s.preset;draw();})
     .catch(function(){say("Cannot read the matrix");}),
