@@ -245,6 +245,85 @@ async function refreshesConnectionWhileOpen() {
   assert.strictEqual(p.tick(), 0, "no refresh once the dialog is closed");
 }
 
+// "AP off while connected" (ADR 0005): the same texts in the matrix page and the settings UI.
+const APOFF_ON = "Stored. The access point switches off 30 s after the DSP has joined its WiFi; the DSP is then only reachable on its WiFi IP. The access point comes back when the connection is lost.";
+const APOFF_OFF = "Stored. The access point stays available.";
+
+async function showsStoredApOffSetting() {
+  const p = run(page, { "/wificonfig": wificonfig({ ssid: "home", connected: false, apoff: true, apup: true }) });
+  p.context.openWifi();
+  await settle();
+  assert.strictEqual(p.elements.apoff.checked, true);
+
+  const q = run(page, { "/wificonfig": wificonfig({ ssid: "home", connected: false }) });
+  q.context.openWifi();
+  await settle();
+  assert.strictEqual(q.elements.apoff.checked, false, "older firmware without the setting: off");
+
+  const s = run(settings, { "/wificonfig": wificonfig({ ssid: "home", apoff: true }) });
+  s.context.getWifiConfig();
+  await settle();
+  assert.strictEqual(s.elements.apoff.checked, true, "the settings UI shows it too");
+}
+
+async function storesApOffWithReachabilityNote() {
+  for (const [checked, msg] of [[true, APOFF_ON], [false, APOFF_OFF]]) {
+    const s = run(settings, {});
+    s.context.document.getElementById("apoff").checked = checked;
+    s.context.sendApOff();
+    await settle();
+    assert.strictEqual(s.requests.length, 1);
+    assert.strictEqual(s.requests[0].url, "/apoff");
+    assert.strictEqual(s.requests[0].options.method, "POST");
+    assert.deepStrictEqual(JSON.parse(s.requests[0].options.body), { apoff: checked });
+    assert.deepStrictEqual(s.alerts, [msg], "settings UI reference");
+
+    const p = run(page, {});
+    p.context.document.getElementById("apoff").checked = checked;
+    await p.context.storeApOff();
+    assert.strictEqual(p.requests.length, 1);
+    assert.strictEqual(p.requests[0].url, "/apoff");
+    assert.deepStrictEqual(JSON.parse(p.requests[0].options.body), { apoff: checked });
+    assert.strictEqual(p.elements.smsg.textContent, msg);
+  }
+
+  const p = run(page, { "/apoff": { status: 400, body: "apoff must be true or false" } });
+  p.context.document.getElementById("apoff").checked = true;
+  await p.context.storeApOff();
+  assert.strictEqual(p.elements.smsg.textContent, "Not stored: apoff must be true or false");
+  assert.strictEqual(p.elements.apoff.checked, false, "a refused change is undone");
+}
+
+async function connectionStateTellsWhetherTheApStays() {
+  const p = run(page, { "/wificonfig": wificonfig({ ssid: "home", connected: true, ip: "10.0.0.7", apoff: true, apup: true }) });
+  p.context.openWifi();
+  await settle();
+  assert.strictEqual(p.elements.wstat.textContent,
+    "Connected to \"home\", IP 10.0.0.7. In that network the DSP is reachable at http://10.0.0.7/; the access point switches off shortly.");
+
+  const q = run(page, { "/wificonfig": wificonfig({ ssid: "home", connected: true, ip: "10.0.0.7", apoff: true, apup: false }) });
+  q.context.openWifi();
+  await settle();
+  assert.strictEqual(q.elements.wstat.textContent,
+    "Connected to \"home\", IP 10.0.0.7. In that network the DSP is reachable at http://10.0.0.7/; the access point is off while connected.");
+
+  const r = run(page, { "/wificonfig": wificonfig({ ssid: "home", connected: false, apoff: true, apup: true }) });
+  r.context.openWifi();
+  await settle();
+  assert.strictEqual(r.elements.wstat.textContent, "Not connected to \"home\". The DSP keeps trying; the access point stays available.");
+}
+
+async function joinNoteMentionsTheApGoingOff() {
+  const p = run(page, {});
+  Object.assign(p.context.document.getElementById("ssid"), { value: "home" });
+  Object.assign(p.context.document.getElementById("pwd"), { value: "secret123" });
+  p.context.document.getElementById("apoff").checked = true;
+  await p.context.joinWifi();
+  assert.deepStrictEqual(JSON.parse(p.requests[0].options.body), { ssid: "home", pwd: "secret123" });
+  assert.strictEqual(p.elements.smsg.textContent,
+    "Stored. The DSP now joins \"home\". Once connected, it is reachable in that network on the IP shown above; the access point then switches off after 30 s.");
+}
+
 async function main() {
   await opensWithCurrentApConfig();
   await showsOpenApWarningLikeSettings();
@@ -257,6 +336,10 @@ async function main() {
   await forgetsWifiAndKeepsTheAp();
   await showsStoredNetworkAndConnection();
   await refreshesConnectionWhileOpen();
+  await showsStoredApOffSetting();
+  await storesApOffWithReachabilityNote();
+  await connectionStateTellsWhetherTheApStays();
+  await joinNoteMentionsTheApGoingOff();
   console.log("all tests passed");
 }
 

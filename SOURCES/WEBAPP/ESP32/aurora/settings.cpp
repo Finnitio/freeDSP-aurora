@@ -18,7 +18,7 @@ void writeSettings( void )
 
   if( fileSettings )
   {
-    StaticJsonDocument<512> jsonSettings;
+    StaticJsonDocument<768> jsonSettings;
     jsonSettings["ssid"] = Settings.ssid;
     jsonSettings["pwd"] = Settings.password;
     jsonSettings["aid"] = Settings.addonid;
@@ -28,6 +28,7 @@ void writeSettings( void )
     jsonSettings["apchannel"] = Settings.apchannel;
     jsonSettings["adcsum"] = Settings.adcsum;
     jsonSettings["wifion"] = Settings.wifiOn;
+    jsonSettings["apoff"] = Settings.apOffWhileConnected;
 
     if( serializeJson( jsonSettings, fileSettings ) == 0 )
       Serial.println( "[ERROR] writeSettings(): Failed to write settings to file" );
@@ -52,6 +53,7 @@ void readSettings( void )
   Settings.apchannel = AP_CHANNEL_DEFAULT;
   Settings.adcsum = 0;
   Settings.wifiOn = true;
+  Settings.apOffWhileConnected = false;
 
   if( !SPIFFS.exists( "/settings.ini" ) )
   {
@@ -69,7 +71,7 @@ void readSettings( void )
 
   if( fileSettings )
   {
-    StaticJsonDocument<512> jsonDoc;
+    StaticJsonDocument<768> jsonDoc;
     DeserializationError err = deserializeJson( jsonDoc, fileSettings );
     if( err )
     {
@@ -106,6 +108,8 @@ void readSettings( void )
       Settings.wifiOn = true;
     else if( jsonSettings["wifion"].as<String>() == "false" )
       Settings.wifiOn = false;
+    // Older files have no "apoff": the AP stays always on
+    Settings.apOffWhileConnected = jsonSettings["apoff"] | false;
 
     Serial.println( "[OK]" );
     Serial.println( "Device config" );

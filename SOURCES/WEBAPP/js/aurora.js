@@ -240,6 +240,21 @@ function sendWifi(){
   .catch(function(err){console.log(err);});
 }
 
+// "AP off while connected" (docs/adr 0005), applied at once. 30 s = ApSwitch::GRACE_MS
+function sendApOff(){
+  var box=document.getElementById("apoff");
+  var data={apoff:box.checked===true};
+  fetch("/apoff",{method:"POST",headers:{"Content-Type": "application/json"},body:JSON.stringify(data)})
+  .then(function(response){
+    if(response.ok)
+      alert(data.apoff ? "Stored. The access point switches off 30 s after the DSP has joined its WiFi; the DSP is then only reachable on its WiFi IP. The access point comes back when the connection is lost."
+                       : "Stored. The access point stays available.");
+    else
+      response.text().then(function(t){box.checked=!data.apoff;alert("Not stored: "+t);});
+    return response;})
+  .catch(function(err){box.checked=!data.apoff;console.log(err);});
+}
+
 function sendPwdAP(){
   var data={};
   data.pwdap=document.getElementById("pwdap").value;
@@ -277,6 +292,9 @@ function getWifiConfig(){
     document.getElementById('ssid').value = data.ssid;
     document.getElementById('apname').value = data.apname;
     document.getElementById('apchannel').value = data.apchannel;
+    var apoff = document.getElementById('apoff');
+    if(apoff)
+      apoff.checked = data.apoff === true;
     var warn = document.getElementById('apwarn');
     if(warn){
       warn.textContent = apWarningText(data);

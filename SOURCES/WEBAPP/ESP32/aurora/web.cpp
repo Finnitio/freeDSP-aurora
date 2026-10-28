@@ -32,6 +32,7 @@ extern Display myDisplay;
 #endif
 extern void updateUI(void);
 extern volatile bool apOpenFallback;
+extern volatile bool apUp;
 extern const char* apPasswordError;
 
 extern String sourceNames[kNumSourceNames];
@@ -904,6 +905,9 @@ void handleGetWifiConfigJson( AsyncWebServerRequest* request )
     jsonResponse["ip"] = WiFi.localIP().toString();
   // AP runs open because the stored password is invalid (until restart with a valid one)
   jsonResponse["apopenfallback"] = (bool)apOpenFallback;
+  // "AP off while connected" (docs/adr 0005) and whether the AP is running now
+  jsonResponse["apoff"] = Settings.apOffWhileConnected;
+  jsonResponse["apup"] = (bool)apUp;
   if( apOpenFallback && apPasswordError )
     jsonResponse["appwderror"] = apPasswordError;
 
@@ -1536,6 +1540,28 @@ static const char* validatePostWifiConfigJson( JsonObject root )
 }
 
 //==============================================================================
+/*! Handles the POST request for "AP off while connected". Applied at runtime
+ *  by the WiFi task.
+ */
+void handlePostApOffJson( JsonObject root )
+{
+  #if DEBUG_PRINT
+  Serial.println(F("POST /apoff"));
+  #endif
+
+  Settings.apOffWhileConnected = root["apoff"].as<bool>();
+  writeSettings();
+}
+
+//==============================================================================
+/*! Checks the POST /apoff body. Returns a message for the UI or NULL.
+ */
+static const char* validatePostApOffJson( JsonObject root )
+{
+  return root["apoff"].is<bool>() ? NULL : "apoff must be true or false";
+}
+
+//==============================================================================
 /*! Handles the POST request for access point password
  *
  */
@@ -2042,6 +2068,10 @@ void setupWebserver (void)
   server.on( "/wifi", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
   {
     postJson( request, data, len, index, total, handlePostWifiConfigJson, 1024, validatePostWifiConfigJson );
+  });
+  server.on( "/apoff", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
+  {
+    postJson( request, data, len, index, total, handlePostApOffJson, 256, validatePostApOffJson );
   });
   server.on( "/pwdap", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
   {

@@ -84,16 +84,30 @@ static void displayWarnsWhileTheApRunsOpenByFallback()
 {
   char line[AP_STATUS_LINE_SIZE];
   // 5x7 font on a 128 px display: at most 25 characters
-  apStatusLine(line, sizeof(line), "Not Connected", false, true);
+  apStatusLine(line, sizeof(line), "Not Connected", false, true, true);
   assert(strcmp(line, "OPEN AP: invalid password") == 0);
-  apStatusLine(line, sizeof(line), "192.168.178.123", true, true);
+  apStatusLine(line, sizeof(line), "192.168.178.123", true, true, true);
   assert(strcmp(line, "OPEN AP! 192.168.178.123") == 0);  // IP stays visible
   assert(strlen(line) <= 25);
 
-  apStatusLine(line, sizeof(line), "192.168.178.123", true, false);
-  assert(strcmp(line, "192.168.178.123") == 0);
-  apStatusLine(line, sizeof(line), "Not Connected", false, false);
-  assert(strcmp(line, "Not Connected") == 0);
+  // "AP off while connected" closed the open AP: no warning
+  apStatusLine(line, sizeof(line), "192.168.178.123", true, true, false);
+  assert(strcmp(line, "192.168.178.123, AP off") == 0);
+}
+
+static void displayShowsWhetherTheApIsUp()
+{
+  char line[AP_STATUS_LINE_SIZE];
+  apStatusLine(line, sizeof(line), "192.168.178.123", true, false, true);
+  assert(strcmp(line, "192.168.178.123, AP on") == 0);
+  apStatusLine(line, sizeof(line), "192.168.178.123", true, false, false);
+  assert(strcmp(line, "192.168.178.123, AP off") == 0);
+  apStatusLine(line, sizeof(line), "255.255.255.255", true, false, false);
+  assert(strlen(line) <= 25);                                // longest IP fits
+  apStatusLine(line, sizeof(line), "Not Connected", false, false, true);
+  assert(strcmp(line, "Not Connected, AP on") == 0);
+  apStatusLine(line, sizeof(line), "Not Connected", false, false, false);  // WiFi switched off
+  assert(strcmp(line, "Not Connected, AP off") == 0);
 }
 
 static void wifiCredentialsAreChecked()
@@ -122,6 +136,7 @@ int main()
   invalidPasswordFallsBackToAnOpenAp();
   invalidNameAndChannelFallBackToDefaults();
   displayWarnsWhileTheApRunsOpenByFallback();
+  displayShowsWhetherTheApIsUp();
   wifiCredentialsAreChecked();
   printf("all tests passed\n");
   return 0;

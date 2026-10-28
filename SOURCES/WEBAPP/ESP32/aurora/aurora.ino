@@ -30,6 +30,7 @@
 #include "channelnames.h"
 #include "inputrouting.h"
 #include "staretry.h"
+#include "apswitch.h"
 #include "apconfig.h"
 #include "i2cworker.h"
 #include "matrix.h"
@@ -53,6 +54,7 @@ File fileDspProgram;
 bool changeWifiState = false;
 // Set by startAP(): the AP runs open because the stored password is invalid
 volatile bool apOpenFallback = false;
+volatile bool apUp = false;  //!< the AP is running (off with WiFi off or "AP off while connected")
 const char* apPasswordError = NULL;  //!< why, while apOpenFallback is set
 DNSServer dnsServer;
 
@@ -199,7 +201,7 @@ static String uiStatusLine( void )
   bool connected = WiFi.status() == WL_CONNECTED;
   String ip = connected ? WiFi.localIP().toString() : String( F("Not Connected") );
   char line[AP_STATUS_LINE_SIZE];
-  apStatusLine( line, sizeof( line ), ip.c_str(), connected, apOpenFallback );
+  apStatusLine( line, sizeof( line ), ip.c_str(), connected, apOpenFallback, apUp );
   return String( line );
 }
 
@@ -293,6 +295,21 @@ static void startAP()
   // Answer every DNS name with the AP address
   dnsServer.stop();
   dnsServer.start(53, "*", ip);
+  apUp = true;
+}
+
+//==============================================================================
+/*! Stops the access point; the STA side keeps its connection.
+ *
+ */
+static void stopAP()
+{
+  dnsServer.stop();
+  if(!WiFi.softAPdisconnect(true))  // true: AP_STA -> STA
+    Serial.println(F("[ERROR] Stopping the AP failed"));
+  Serial.println(F("AP stopped (AP off while connected)"));
+  apUp = false;
+  needUpdateUI = true;
 }
 
 //==============================================================================
@@ -321,6 +338,7 @@ void myWiFiTask(void *pvParameters)
   bool wasConnected = false;
   wl_status_t lastState = WL_CONNECTED;
   StaRetry staRetry;
+  ApSwitch apSwitch;  // "AP off while connected"; the AP is up after startAP() below
   // Credentials STA currently uses; empty SSID = STA off (pure AP)
   String ssid = Settings.ssid;
   String password = Settings.password;
@@ -330,7 +348,8 @@ void myWiFiTask(void *pvParameters)
   // AP channel along). Reconnects are driven by StaRetry below.
   WiFi.persistent(false);
   WiFi.setAutoReconnect(false);
-  // WiFi is never switched off, so the AP is never dropped.
+  // WiFi is never switched off. The AP is only dropped while connected if the
+  // user enabled "AP off while connected" (ApSwitch below, docs/adr 0005).
   WiFi.mode(ssid.length() > 0 ? WIFI_AP_STA : WIFI_AP);
   WiFi.setHostname(AP_HOSTNAME);
   startAP();
@@ -348,17 +367,33 @@ void myWiFiTask(void *pvParameters)
       password = Settings.password;
       const bool staOn = ssid.length() > 0;
       if(staWasOn)
-        WiFi.disconnect();  // keeps the mode (AP stays up)
+        WiFi.disconnect();  // keeps the mode; a stopped AP restarts via ApSwitch
       if(staOn != staWasOn)
       {
         WiFi.mode(staOn ? WIFI_AP_STA : WIFI_AP);
         startAP();
+        apSwitch = ApSwitch();  // the AP is up again
       }
       staRetry = StaRetry();  // fresh retry rule for the new network
     }
 
     wl_status_t state = WiFi.status();
     bool connected = (state == WL_CONNECTED);
+    // Before the STA retry, so a restarted AP's mode change can't abort a new attempt
+    switch(apSwitch.update(Settings.apOffWhileConnected && ssid.length() > 0, connected, millis()))
+    {
+    case ApSwitch::START:
+      Serial.println(F("Restarting the AP"));
+      WiFi.mode(WIFI_AP_STA);
+      startAP();
+      break;
+    case ApSwitch::STOP:
+      stopAP();
+      break;
+    default:
+      break;
+    }
+
     if(ssid.length() > 0)
     {
       if(!connected && state != lastState)
@@ -369,7 +404,7 @@ void myWiFiTask(void *pvParameters)
       case StaRetry::BEGIN:
         Serial.print(F("Connecting to "));
         Serial.println(ssid.c_str());
-        WiFi.disconnect();  // abort a pending attempt; keeps the mode (AP stays up)
+        WiFi.disconnect();  // abort a pending attempt; keeps the mode
         WiFi.begin(ssid.c_str(), password.c_str());
         break;
       case StaRetry::STOP:
