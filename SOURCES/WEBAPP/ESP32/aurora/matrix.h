@@ -20,6 +20,11 @@ void matrixInit( void );
  *  it once it has settled. The volume is global: a Preset switch keeps it. */
 void matrixMasterVolumeChanged( void );
 
+/*! Writes the Baseline to the DSP in full, so the model matches the freshly
+ *  loaded DSP program. Call once right after the DSP program upload, while the
+ *  DAC is still muted (in setup(), before resetDAC(false)). */
+void matrixWriteBaseline( void );
+
 /*! Loads the active preset (or the defaults if there is no file) and writes it to
  *  the DSP. Saves unsaved changes of the previously active preset first. Runs on
  *  the I2C worker (or in setup()); the DSP writes happen right away. */

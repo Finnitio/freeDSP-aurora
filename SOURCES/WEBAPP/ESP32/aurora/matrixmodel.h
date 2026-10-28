@@ -82,8 +82,8 @@ struct MatrixEditResult
 class MatrixModel
 {
 public:
-  /*! Starts with the defaults (no writes): Bus 1 = Analog 1, Bus 2 = Analog 2,
-   *  Outputs alternate Bus 1 / Bus 2, all Outputs muted, 0 dB. maxDelay: the plugin's
+  /*! Starts with the Baseline (no writes): no Slots, 0 dB, Buses unmuted on
+   *  Bus 1 = Analog 1 and Bus 2 = Analog 2, all Outputs muted and routed from Bus 1. maxDelay: the plugin's
    *  Output delay limit in samples (0 = unknown), capped at MATRIX_MAX_DELAY_SAMPLES. */
   MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad = 0, int maxDelay = 0 );
 
@@ -136,7 +136,8 @@ public:
   /*! Writes the whole state to the DSP. */
   void applyAll( void );
 
-  /*! Back to the defaults, written to the DSP (preset slot without a file). */
+  /*! Back to the Baseline, written to the DSP in full: after the DSP program is
+   *  loaded, and for a Preset slot without a (valid) file. */
   void loadDefaults( void );
 
   /*! True once, MATRIX_SAVE_DELAY_MS after the last change; markSaved() clears it. */

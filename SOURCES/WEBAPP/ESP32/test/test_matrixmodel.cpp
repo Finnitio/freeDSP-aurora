@@ -73,21 +73,34 @@ static DynamicJsonDocument stateOf(const MatrixModel& m)
 
 static bool near(double a, double b) { return std::fabs(a - b) < 1e-6; }
 
-static void freshDefaults()
+// The Baseline (GLOSSARY): no Slots, 0 dB, Buses unmuted on Analog 1 / Analog 2,
+// every Output muted and routed from Bus 1.
+static void assertBaseline(const MatrixModel& m)
 {
-  FakePort port;
-  MatrixModel m(port, 2, 8);
   DynamicJsonDocument st = stateOf(m);
   assert(st["buses"][0]["source"] == 0);  // Analog 1
   assert(st["buses"][1]["source"] == 1);  // Analog 2
+  for (int b = 0; b < 2; b++)
+  {
+    assert(st["buses"][b]["mute"] == false);
+    assert(st["buses"][b]["gain"] == 0);
+    assert(st["buses"][b]["slots"].size() == 0);
+  }
   for (int o = 0; o < 8; o++)
   {
-    assert(st["outs"][o]["route"] == o % 2);  // alternate Bus 1 / Bus 2
+    assert(st["outs"][o]["route"] == 0);  // Bus 1
     assert(st["outs"][o]["mute"] == true);
+    assert(st["outs"][o]["gain"] == 0);
+    assert(st["outs"][o]["slots"].size() == 0);
   }
-  assert(st["buses"][0]["mute"] == false);
-  assert(st["outs"][0]["gain"] == 0);
   assert(std::string(st["outs"][3]["name"].as<const char*>()) == "Output 4");
+}
+
+static void freshModelIsTheBaseline()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  assertBaseline(m);
 }
 
 static void applyAllEmitsFullWriteSet()
@@ -271,9 +284,12 @@ static void loadDefaultsResetsAndWritesEverything()
     assert(patch(m, json).empty());
   }
   patch(m, "{\"ch\":\"out\",\"idx\":0,\"mute\":false,\"name\":\"X\"}", 10);
+  patch(m, "{\"ch\":\"out\",\"idx\":3,\"route\":2}", 10);
+  patch(m, "{\"ch\":\"bus\",\"idx\":0,\"source\":65538,\"gain\":-3}", 10);
   port.w.clear();
   port.bq.clear();
   m.loadDefaults();
+  assertBaseline(m);
 
   DynamicJsonDocument st = stateOf(m);
   for (int b = 0; b < 2; b++)
@@ -291,6 +307,14 @@ static void loadDefaultsResetsAndWritesEverything()
   }
   assert(m.savePreset() == fresh);
   assert(port.w.size() == 4 + 32 + 1);
+  int routes = 0;
+  for (size_t i = 0; i < port.w.size(); i++)
+    if (port.w[i].type == 'r')
+    {
+      assert(port.w[i].val == 0);  // every Output from Bus 1
+      routes++;
+    }
+  assert(routes == 8);
   assert(port.bq.size() == 10 * budget);
   for (size_t i = 0; i < port.bq.size(); i++)
     assert(port.bq[i].a[0] == 1 && port.bq[i].a[1] == 0 && port.bq[i].a[2] == 0
@@ -361,7 +385,7 @@ static void undoRestoresTheLastAcceptedPatch()
   patch(m, "{\"ch\":\"out\",\"idx\":1,\"name\":\"Keep\"}", 1000);
   m.markSaved();
   const std::string before = m.savePreset();
-  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"mute\":false,\"route\":0,\"name\":\"X\"}", 5000).empty());
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"mute\":false,\"route\":1,\"name\":\"X\"}", 5000).empty());
   assert(m.dirty());
   m.undo();
   assert(m.savePreset() == before);
@@ -1697,7 +1721,7 @@ int main()
   spdifOutEmitsLeftAndRightMuxWrites();
   spdifOutRejectsOddPairsAndUndoes();
   spdifOutSurvivesPresetRoundTrip();
-  freshDefaults();
+  freshModelIsTheBaseline();
   applyAllEmitsFullWriteSet();
   muteAndGainWrites();
   busMuteWritesBusGain();

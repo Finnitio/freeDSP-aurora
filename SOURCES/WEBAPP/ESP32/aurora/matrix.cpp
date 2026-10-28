@@ -198,6 +198,20 @@ std::string matrixCoeffs( const char* ch, int idx )
   return model->coeffsJson( ch, idx );
 }
 
+void matrixWriteBaseline( void )
+{
+  if( !model )
+    return;
+  std::vector<Op> ops;
+  {
+    ModelLock lock;
+    port.ops.clear();
+    model->loadDefaults();
+    ops.swap( port.ops );
+  }
+  execOps( ops );
+}
+
 void matrixLoadPreset( void )
 {
   if( !model )

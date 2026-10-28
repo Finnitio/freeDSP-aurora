@@ -640,6 +640,8 @@ void setup()
   //--- Upload program to DSP
   //----------------------------------------------------------------------------
   uploadDspFirmware();
+  // the DAC is still in reset (muted) until resetDAC(false) below
+  matrixWriteBaseline();
 
   //----------------------------------------------------------------------------
   //--- Upload user parameters to DSP
