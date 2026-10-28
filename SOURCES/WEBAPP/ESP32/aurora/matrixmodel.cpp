@@ -205,9 +205,23 @@ void MatrixModel::writeStages( MatrixChannelKind kind, int idx, const Channel& c
   stages( c, now );
   if( prev )
     stages( *prev, before );
+  int changed = 0;
+  for( int s = 0; s < nbiquad_; s++ )
+    if( !prev || memcmp( &now[s], &before[s], sizeof( Coef ) ) != 0 )
+      changed++;
+
+  const double restore = linear( c );
+  const bool ramp = prev && changed > 1 && restore != 0.0;
+  if( ramp )
+  {
+    port_.writeGain( kind, idx, 0.0 );
+    port_.waitMs( MATRIX_RAMP_MS );
+  }
   for( int s = 0; s < nbiquad_; s++ )
     if( !prev || memcmp( &now[s], &before[s], sizeof( Coef ) ) != 0 )
       port_.writeBiquad( kind, idx, s, now[s].a, now[s].b );
+  if( ramp )
+    port_.writeGain( kind, idx, restore );
 }
 
 /*! Slot edit of a patch; changes only c, and only if it returns "". */
