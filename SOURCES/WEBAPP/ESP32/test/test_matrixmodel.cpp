@@ -4,6 +4,7 @@
 // Uses: ArduinoJson
 #include <cassert>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -1811,6 +1812,141 @@ static void failedLoadLeavesModelAndWritesUntouched()
   assert(ramp.size() == 1 && ramp[0].idx == 7 && ramp[0].linear == 0.5);
 }
 
+// Ticket 03: a Preset switch takes the shared ramp around the difference.
+
+// Records every write in order as text: "g out 1 0", "w 20", "b out 1 0", "r 4 1", "s 1 131075" ...
+struct OrderPort : MatrixPort
+{
+  std::vector<std::string> log;
+  void add(const char* fmt, ...) __attribute__((format(printf, 2, 3)))
+  {
+    char buf[64];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    log.push_back(buf);
+  }
+  static const char* k(MatrixChannelKind kind) { return kind == MATRIX_BUS ? "bus" : "out"; }
+  void writeGain(MatrixChannelKind kind, int idx, double linear) override { add("g %s %d %.4f", k(kind), idx, linear); }
+  void writeRoute(int out, int route) override { add("r %d %d", out, route); }
+  void writeSource(int bus, uint32_t sel) override { add("s %d %u", bus, (unsigned)sel); }
+  void writePolarity(int out, bool invert) override { add("p %d %d", out, invert ? 1 : 0); }
+  void writeDelay(int out, int samples) override { add("d %d %d", out, samples); }
+  void waitMs(int ms) override { add("w %d", ms); }
+  void writeSpdifOut(uint32_t left, uint32_t right) override { add("o %u %u", (unsigned)left, (unsigned)right); }
+  void writeBiquad(MatrixChannelKind kind, int idx, int stage, const float*, const float*) override { add("b %s %d %d", k(kind), idx, stage); }
+};
+
+static std::vector<std::string> lines(std::initializer_list<const char*> l)
+{
+  return std::vector<std::string>(l.begin(), l.end());
+}
+
+static void presetSwitchRampsDownWritesTheDifferenceAndRampsUp()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"mute\":false}").empty());
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":4,\"mute\":false}").empty());
+  // Output 2: one more PEQ and -6 dB; Output 5: route Bus 2; Output 3: polarity only (no ramp)
+  std::string next = presetWith(m, 2, "{\"ch\":\"out\",\"idx\":1,\"gain\":-6,\"slot\":{\"op\":\"add\",\"freq\":1000,\"gain\":6}}");
+  {
+    FakePort scratch;
+    MatrixModel other(scratch, 2, 8, 2);
+    assert(other.loadPreset(next).empty());
+    assert(patch(other, "{\"ch\":\"out\",\"idx\":4,\"route\":1}").empty());
+    assert(patch(other, "{\"ch\":\"out\",\"idx\":2,\"polarity\":true}").empty());
+    next = other.savePreset();
+  }
+  port.log.clear();
+  assert(m.switchPreset(next).empty());
+  char wait[16];
+  snprintf(wait, sizeof(wait), "w %d", MATRIX_RAMP_MS);
+  const std::vector<std::string> want = lines({
+    "g out 1 0.0000", "g out 4 0.0000", wait,  // ramp down every marked Channel once
+    "b out 1 0", "p 2 1", "r 4 1",             // the difference, in Channel order
+    "g out 1 0.5012", "g out 4 1.0000" });     // ramp up to the loaded gains
+  if (port.log != want)
+    for (size_t i = 0; i < port.log.size(); i++) fprintf(stderr, "%s\n", port.log[i].c_str());
+  assert(port.log == want);
+}
+
+// Mute, gain, delay, polarity and SPDIF differences alone: written without ramp or wait.
+static void presetSwitchWithoutMarkedChannelsEmitsNoRamp()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"mute\":false}").empty());
+  const std::string next = presetWith(m, 2, "{\"ch\":\"out\",\"idx\":0,\"gain\":-6,\"polarity\":true,\"delayUs\":1000}");
+  port.log.clear();
+  assert(m.switchPreset(next).empty());
+  assert(port.log == lines({ "g out 0 0.5012", "p 0 1", "d 0 48" }));
+  port.log.clear();
+  assert(m.switchPreset(next).empty());  // the same Preset again: nothing at all
+  assert(port.log.empty());
+}
+
+// A marked Channel that was silent needs no ramp down; one silent after the load stays at 0.
+static void presetSwitchRampsOnlyAudibleChannels()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":3,\"mute\":false}").empty());
+  // Output 1 (muted before) unmutes on Bus 2; Output 4 (audible before) is muted on Bus 2;
+  // Output 6 stays muted on Bus 2
+  std::string next;
+  {
+    FakePort scratch;
+    MatrixModel other(scratch, 2, 8, 2);
+    assert(other.loadPreset(m.savePreset()).empty());
+    assert(patch(other, "{\"ch\":\"out\",\"idx\":0,\"mute\":false,\"route\":1}").empty());
+    assert(patch(other, "{\"ch\":\"out\",\"idx\":3,\"mute\":true,\"route\":1}").empty());
+    assert(patch(other, "{\"ch\":\"out\",\"idx\":5,\"route\":1}").empty());
+    next = other.savePreset();
+  }
+  port.log.clear();
+  assert(m.switchPreset(next).empty());
+  char wait[16];
+  snprintf(wait, sizeof(wait), "w %d", MATRIX_RAMP_MS);
+  assert(port.log == lines({ "g out 3 0.0000", wait, "r 0 1", "r 3 1", "r 5 1", "g out 0 1.0000" }));
+
+  // only silent Channels marked: no ramp down, no wait
+  port.log.clear();
+  assert(m.switchPreset(presetWith(m, 2, "{\"ch\":\"out\",\"idx\":5,\"route\":0}")).empty());
+  assert(port.log == lines({ "r 5 0" }));
+}
+
+static void failedPresetSwitchWritesNothing()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":3,\"mute\":false,\"route\":2}", 100).empty());
+  const std::string before = m.savePreset();
+  port.log.clear();
+  assert(!m.switchPreset("not json").empty());
+  assert(!m.switchPreset("{\"v\":3,\"buses\":[],\"outs\":[]}").empty());
+  assert(port.log.empty() && m.savePreset() == before && m.dirty());
+}
+
+// A Preset without a (valid) file switches to the Baseline through the same ramp.
+static void switchToDefaultsTakesTheSharedRamp()
+{
+  OrderPort port;
+  MatrixModel m(port, 2, 8, 2);
+  assert(patch(m, "{\"ch\":\"bus\",\"idx\":0,\"source\":131075}").empty());
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"mute\":false,\"gain\":-6}").empty());
+  port.log.clear();
+  m.switchToDefaults();
+  char wait[16];
+  snprintf(wait, sizeof(wait), "w %d", MATRIX_RAMP_MS);
+  assert(port.log == lines({ "g bus 0 0.0000", wait, "s 0 0", "g out 1 0.0000", "g bus 0 1.0000" }));
+  assert(!m.dirty());
+  port.log.clear();
+  m.switchToDefaults();
+  assert(port.log.empty());
+}
+
 int main()
 {
   editResultsDistinguishSuccessBadRequestAndConflict();
@@ -1887,6 +2023,11 @@ int main()
   slotLayoutChangeWritesTheShiftedBiquadsAndRamps();
   onlySourceRouteAndFilterDifferencesMarkTheRamp();
   failedLoadLeavesModelAndWritesUntouched();
+  presetSwitchRampsDownWritesTheDifferenceAndRampsUp();
+  presetSwitchWithoutMarkedChannelsEmitsNoRamp();
+  presetSwitchRampsOnlyAudibleChannels();
+  failedPresetSwitchWritesNothing();
+  switchToDefaultsTakesTheSharedRamp();
   printf("all tests passed\n");
   return 0;
 }

@@ -447,13 +447,23 @@ void MatrixModel::saveUndo( void )
 
 void MatrixModel::loadDefaults( MatrixRampSet* ramp )
 {
+  resetTo( ramp, false );
+}
+
+void MatrixModel::switchToDefaults( void )
+{
+  resetTo( NULL, true );
+}
+
+void MatrixModel::resetTo( MatrixRampSet* ramp, bool shared )
+{
   Snapshot before;
   snapshot( before );
   const uint32_t spdifBefore = spdif_;
   reset();
   undo_.valid = false;
   dirty_ = false;
-  writeDiff( before, spdifBefore, ramp );
+  writeDiff( before, spdifBefore, ramp, shared );
 }
 
 double MatrixModel::linear( const Channel& c ) const
@@ -516,11 +526,32 @@ void MatrixModel::writeChanges( const Snapshot& before )
   }
 }
 
-/*! Preset load: writes every block that differs from the snapshot, without a ramp.
- *  Channels with a filter, Source or route difference form the ramp set; their gain
- *  write (if it differs) comes last, so a ramp around these writes ends with it. */
-void MatrixModel::writeDiff( const Snapshot& before, uint32_t spdifBefore, MatrixRampSet* ramp )
+/*! Preset load: writes every block that differs from the snapshot. Channels with a
+ *  filter, Source or route difference form the ramp set; their gain write (if it
+ *  differs) comes last, so a ramp around these writes ends with it. shared: the
+ *  Preset switch's shared ramp around the difference: every marked Channel that was
+ *  audible goes down to 0 first, one wait, the difference, then every marked Channel
+ *  that is audible after the load goes up to its gain. */
+void MatrixModel::writeDiff( const Snapshot& before, uint32_t spdifBefore, MatrixRampSet* ramp, bool shared )
 {
+  bool marked[MATRIX_MAX_BUS + MATRIX_MAX_OUT];
+  bool anyDown = false;
+  for( int n = 0; n < nbus_ + nout_; n++ )
+  {
+    const MatrixChannelKind kind = n < nbus_ ? MATRIX_BUS : MATRIX_OUT;
+    const int idx = n < nbus_ ? n : n - nbus_;
+    const Channel& was = kind == MATRIX_BUS ? before.bus[idx] : before.out[idx];
+    const Channel& now = kind == MATRIX_BUS ? bus_[idx] : out_[idx];
+    marked[n] = now.sel != was.sel || needsRamp( was, now );
+    if( shared && marked[n] && linear( was ) != 0.0 )
+    {
+      port_.writeGain( kind, idx, 0.0 );
+      anyDown = true;
+    }
+  }
+  if( anyDown )
+    port_.waitMs( MATRIX_RAMP_MS );
+
   MatrixRampSet set;
   for( int n = 0; n < nbus_ + nout_; n++ )
   {
@@ -528,10 +559,9 @@ void MatrixModel::writeDiff( const Snapshot& before, uint32_t spdifBefore, Matri
     const int idx = n < nbus_ ? n : n - nbus_;
     const Channel& was = kind == MATRIX_BUS ? before.bus[idx] : before.out[idx];
     const Channel& now = kind == MATRIX_BUS ? bus_[idx] : out_[idx];
-    const bool marked = now.sel != was.sel || needsRamp( was, now );
-    if( marked )
+    if( marked[n] )
       set.push_back( { kind, idx, linear( now ) } );
-    if( !marked && linear( now ) != linear( was ) ) port_.writeGain( kind, idx, linear( now ) );
+    if( !marked[n] && linear( now ) != linear( was ) ) port_.writeGain( kind, idx, linear( now ) );
     if( now.sel != was.sel )
     {
       if( kind == MATRIX_BUS ) port_.writeSource( idx, (uint32_t)now.sel ); else port_.writeRoute( idx, now.sel );
@@ -546,10 +576,13 @@ void MatrixModel::writeDiff( const Snapshot& before, uint32_t spdifBefore, Matri
   }
   if( spdif_ != spdifBefore )
     port_.writeSpdifOut( spdif_, spdif_ + 1 );
+  // Hook: further per-Preset writes that belong inside the ramp (Add-on B config, ticket 04) go here.
   for( size_t i = 0; i < set.size(); i++ )
   {
     const Channel& was = set[i].kind == MATRIX_BUS ? before.bus[set[i].idx] : before.out[set[i].idx];
-    if( set[i].linear != linear( was ) ) port_.writeGain( set[i].kind, set[i].idx, set[i].linear );
+    // shared: the ramp down already left a now-silent Channel at 0; plain: only a changed gain
+    if( shared ? set[i].linear != 0.0 : set[i].linear != linear( was ) )
+      port_.writeGain( set[i].kind, set[i].idx, set[i].linear );
   }
   if( ramp )
     ramp->swap( set );
@@ -1165,6 +1198,16 @@ std::string MatrixModel::readChannel( JsonObject o, bool isBus, Channel& c ) con
 
 std::string MatrixModel::loadPreset( const std::string& json, MatrixRampSet* ramp )
 {
+  return load( json, ramp, false );
+}
+
+std::string MatrixModel::switchPreset( const std::string& json )
+{
+  return load( json, NULL, true );
+}
+
+std::string MatrixModel::load( const std::string& json, MatrixRampSet* ramp, bool shared )
+{
   // a smaller document usually fits; the 4x one only when that ran out of memory
   DynamicJsonDocument docS( 2 * json.size() + 1024 );
   DeserializationError jerr = deserializeJson( docS, json.c_str() );
@@ -1247,7 +1290,7 @@ std::string MatrixModel::loadPreset( const std::string& json, MatrixRampSet* ram
   spdif_ = spdif;
   undo_.valid = false;
   dirty_ = false;
-  writeDiff( before, spdifBefore, ramp );
+  writeDiff( before, spdifBefore, ramp, shared );
   return "";
 }
 

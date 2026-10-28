@@ -149,6 +149,15 @@ public:
   std::string savePreset( void ) const;
   std::string loadPreset( const std::string& json, MatrixRampSet* ramp = NULL );
 
+  /*! Preset switch: loads like loadPreset() / loadDefaults() and writes the difference
+   *  inside one shared ramp: every Channel of the ramp set that was audible ramps down
+   *  to 0, one waitMs( MATRIX_RAMP_MS ), the difference, then every Channel of the ramp
+   *  set that is audible after the load ramps up to its gain. Without a ramp-set Channel
+   *  this is the plain difference, with no wait. switchPreset() returns "" or the reason;
+   *  on failure nothing is written and the model is untouched. */
+  std::string switchPreset( const std::string& json );
+  void switchToDefaults( void );
+
   /*! Writes the whole state to the DSP: the Baseline after the DSP program is loaded. */
   void applyAll( void );
 
@@ -221,7 +230,9 @@ private:
   bool needsRamp( const Channel& before, const Channel& after ) const;
   void snapshot( Snapshot& s ) const;
   void writeChanges( const Snapshot& before );
-  void writeDiff( const Snapshot& before, uint32_t spdifBefore, MatrixRampSet* ramp );
+  void writeDiff( const Snapshot& before, uint32_t spdifBefore, MatrixRampSet* ramp, bool shared );
+  std::string load( const std::string& json, MatrixRampSet* ramp, bool shared );
+  void resetTo( MatrixRampSet* ramp, bool shared );
   void putChannel( JsonArray arr, const Channel& c, const char* selKey, bool withLimits ) const;
   std::string readChannel( JsonObject o, bool isBus, Channel& c ) const;
 
