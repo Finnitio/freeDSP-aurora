@@ -28,11 +28,11 @@
 #include "matrixpage.h"
 
 #if HAVE_DISPLAY
-extern void updateUI(void);
 extern Display myDisplay;
+#endif
+extern void updateUI(void);
 extern volatile bool apOpenFallback;
 extern const char* apPasswordError;
-#endif
 
 extern String sourceNames[kNumSourceNames];
 
@@ -1227,8 +1227,10 @@ void handlePostPresetJson( JsonObject root )
   Serial.println(F("POST /preset"));
   #endif
 
+  #if HAVE_DISPLAY
   if( haveDisplay )
     myDisplay.drawSwitchingPreset();
+  #endif
 
 
   softMuteDAC();

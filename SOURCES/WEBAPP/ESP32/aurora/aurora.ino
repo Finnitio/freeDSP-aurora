@@ -187,6 +187,12 @@ void uploadDspFirmware( void )
     Serial.println(F("\n[ERROR] Failed to open file dsp.fw"));
 }
 
+//==============================================================================
+/*! The redraw loop() owes. Drawn only when the bus is free, so loop() never
+ *  waits for a preset load or FIR upload on the worker.
+ */
+static PendingRedraw pendingRedraw;
+
 #if HAVE_DISPLAY
 static String uiStatusLine( void )
 {
@@ -210,12 +216,6 @@ void updateUI( void )
   }
 }
 
-//==============================================================================
-/*! The redraw loop() owes. Drawn only when the bus is free, so loop() never
- *  waits for a preset load or FIR upload on the worker.
- */
-static PendingRedraw pendingRedraw;
-
 static bool tryDrawScreen( PendingRedraw::Screen screen )
 {
   if( !haveDisplay )
@@ -226,6 +226,10 @@ static bool tryDrawScreen( PendingRedraw::Screen screen )
     return myDisplay.tryDrawUI(currentPlugInName.c_str(), uiStatusLine().c_str(), currentPreset, masterVolume.val, editMode);
   return true;
 }
+#else
+// Without a display there is nothing to draw; loop() and the worker jobs stay the same.
+void updateUI( void ) {}
+static bool tryDrawScreen( PendingRedraw::Screen ) { return true; }
 #endif
 
 //==============================================================================
