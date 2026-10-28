@@ -12,7 +12,8 @@
  */
 inline std::string matrixPresetFileName( uint8_t preset )
 {
-  return std::string( "/matrix.00" ) + (char)( '1' + preset ) + ".json";  // NUMPRESETS < 10; no std::to_string on the ESP32 core
+  static_assert( NUMPRESETS < 10, "matrixPresetFileName() writes the slot as one digit" );
+  return std::string( "/matrix.00" ) + (char)( '1' + preset ) + ".json";  // no std::to_string on the ESP32 core
 }
 
 //==============================================================================
