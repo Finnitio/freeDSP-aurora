@@ -245,7 +245,7 @@ async function refreshesConnectionWhileOpen() {
   assert.strictEqual(p.tick(), 0, "no refresh once the dialog is closed");
 }
 
-// "AP off while connected" (ADR 0005): the same texts in the matrix page and the settings UI.
+// "AP off while connected": the same texts in the matrix page and the settings UI.
 const APOFF_ON = "Stored. The access point switches off 30 s after the DSP has joined its WiFi; the DSP is then only reachable on its WiFi IP. The access point comes back when the connection is lost.";
 const APOFF_OFF = "Stored. The access point stays available.";
 

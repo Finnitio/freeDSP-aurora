@@ -349,7 +349,7 @@ void myWiFiTask(void *pvParameters)
   WiFi.persistent(false);
   WiFi.setAutoReconnect(false);
   // WiFi is never switched off. The AP is only dropped while connected if the
-  // user enabled "AP off while connected" (ApSwitch below, docs/adr 0005).
+  // user enabled "AP off while connected" (ApSwitch below).
   WiFi.mode(ssid.length() > 0 ? WIFI_AP_STA : WIFI_AP);
   WiFi.setHostname(AP_HOSTNAME);
   startAP();

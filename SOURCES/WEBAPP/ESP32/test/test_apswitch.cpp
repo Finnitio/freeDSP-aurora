@@ -1,4 +1,4 @@
-// Host tests for the AP on/off rule ("AP off while connected", ADR 0005).
+// Host tests for the AP on/off rule ("AP off while connected").
 // Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
 #include <cassert>
 #include <cstdio>

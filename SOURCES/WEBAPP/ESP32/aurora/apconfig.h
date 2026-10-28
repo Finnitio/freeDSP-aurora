@@ -52,7 +52,7 @@ static inline const char* staConfigError( const char* ssid, const char* pwd )
 /*! How the AP is started from the stored settings, which may be invalid
  *  (older file, edited by hand). Name and channel fall back to their
  *  defaults. An invalid password falls back to an open AP so the web UI
- *  stays reachable (docs/adr: open AP fallback); the stored password is
+ *  stays reachable; the stored password is
  *  left untouched.
  */
 struct ApPlan

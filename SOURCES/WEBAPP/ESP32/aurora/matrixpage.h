@@ -418,7 +418,7 @@ function postWifi(d,ok){
      else ssay("Not stored: "+t);});})
    .catch(function(){ssay("Not stored: no answer from the DSP");});
 }
-// "AP off while connected" (docs/adr 0005), applied at once; the same texts as sendApOff() in aurora.js.
+// "AP off while connected", applied at once; the same texts as sendApOff() in aurora.js.
 // 30 s = ApSwitch::GRACE_MS
 function storeApOff(){
   var c=wifiEl("apoff").checked===true;

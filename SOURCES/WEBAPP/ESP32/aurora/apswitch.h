@@ -5,7 +5,7 @@
 
 //==============================================================================
 /*! Decides when the AP is switched off and on again (setting "AP off while
- *  connected", docs/adr 0005). Pure logic, no WiFi calls, so it can be tested
+ *  connected"). Pure logic, no WiFi calls, so it can be tested
  *  on the host.
  *
  *  With the option off the AP is always up. With the option on the AP stops
