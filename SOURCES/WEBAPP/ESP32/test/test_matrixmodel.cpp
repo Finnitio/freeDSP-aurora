@@ -660,6 +660,29 @@ static void multiBiquadEditsAreRampedAndSingleBiquadEditsStayLive()
   assert(port.events.back().type == 'g' && near(port.events.back().val, std::pow(10.0, -6.0 / 20)));
 }
 
+// Spec 36/37: dragging a slider of a multi-biquad Slot applies live without muting.
+// Only a stage layout shift (add, delete, type/design/order change) ramps the Channel.
+static void parameterEditsOfAMultiBiquadSlotStayLive()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 6);
+  assert(patch(m, "{\"ch\":\"bus\",\"idx\":0,\"gain\":-6}").empty());
+  assert(addSlot(m, "\"type\":\"lp\",\"design\":\"lr\",\"order\":8,\"freq\":2000", "bus", 0).empty());
+
+  port.events.clear();
+  assert(setSlot(m, 0, "\"freq\":2500", "bus", 0).empty());
+  assert(port.events.size() == 4);
+  for (int stage = 0; stage < 4; stage++)
+    assert(port.events[stage].type == 'b' && port.events[stage].val == stage);
+
+  // bypass keeps the Slot's stages allocated, so no other Slot moves: no ramp either
+  port.events.clear();
+  assert(setSlot(m, 0, "\"bypass\":true", "bus", 0).empty());
+  assert(port.events.size() == 4);
+  for (size_t k = 0; k < port.events.size(); k++)
+    assert(port.events[k].type == 'b');
+}
+
 static void bypassOfAMultiBiquadSlotKeepsItsStages()
 {
   FakePort port;
@@ -1377,6 +1400,7 @@ int main()
   slotCostPerTypeAndOrder();
   slotsArepackedInOrder();
   multiBiquadEditsAreRampedAndSingleBiquadEditsStayLive();
+  parameterEditsOfAMultiBiquadSlotStayLive();
   bypassOfAMultiBiquadSlotKeepsItsStages();
   typeCoefficientsGiveTheExpectedResponse();
   slopeChangesTheShelf();

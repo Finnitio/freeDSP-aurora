@@ -224,7 +224,23 @@ void MatrixModel::stages( const Channel& c, std::vector<Coef>& out ) const
   }
 }
 
-/*! Writes the biquads that differ from prev (all of them if prev is NULL). */
+/*! True if a Slot was added or deleted or changed type, design or order: then Slots may sit on
+ *  other biquads than before. Parameter and bypass edits keep every Slot on its biquads. */
+bool MatrixModel::layoutChanged( const Channel& before, const Channel& after )
+{
+  if( after.slots.size() != before.slots.size() )
+    return true;
+  for( size_t i = 0; i < after.slots.size(); i++ )
+  {
+    const Slot& a = after.slots[i]; const Slot& b = before.slots[i];
+    if( a.type != b.type || a.lr != b.lr || a.order != b.order )
+      return true;
+  }
+  return false;
+}
+
+/*! Writes the biquads that differ from prev (all of them if prev is NULL). A layout change
+ *  that rewrites several biquads ramps the Channel around them; parameter edits are safeloaded live. */
 void MatrixModel::writeStages( MatrixChannelKind kind, int idx, const Channel& c, const Channel* prev )
 {
   std::vector<Coef> now, before;
@@ -237,7 +253,7 @@ void MatrixModel::writeStages( MatrixChannelKind kind, int idx, const Channel& c
       changed++;
 
   const double restore = linear( c );
-  const bool ramp = prev && changed > 1 && restore != 0.0;
+  const bool ramp = prev && changed > 1 && restore != 0.0 && layoutChanged( *prev, c );
   if( ramp )
   {
     port_.writeGain( kind, idx, 0.0 );
@@ -417,7 +433,7 @@ void MatrixModel::writeChannelChanges( bool isBus, int idx, const Channel& befor
   for( int s = 0; s < nbiquad_; s++ )
     if( memcmp( &beforeStages[s], &afterStages[s], sizeof( Coef ) ) != 0 )
       changedStages++;
-  const bool filtersRamp = changedStages > 1 && lin != 0.0;
+  const bool filtersRamp = changedStages > 1 && lin != 0.0 && layoutChanged( before, after );
   if( switched && lin != 0.0 )
   {
     port_.writeGain( kind, idx, 0.0 );
