@@ -31,10 +31,17 @@ button:disabled{opacity:.4}
 .linkset{border-left:3px solid #606060;padding-left:6px;margin:4px 0 8px}
 .linkset b{flex:0 0 54px}
 .linkset button{width:auto;min-width:58px;height:28px;border-top-width:1px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+#wifi{position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(0,0,0,.6);overflow-y:auto;z-index:10}
+#wifi .box{box-sizing:border-box;max-width:400px;width:calc(100% - 16px);margin:40px auto;padding:8px 12px;background:#202020;border:1px solid #606060;border-radius:3px}
+#wifi input{box-sizing:border-box;width:100%;height:30px;margin-bottom:6px}
+#wifi .row button{flex:1 1 0;height:32px;border-top-width:1px}
+#apwarn{color:#ff6060;font-weight:bold}
+#wmsg{min-height:18px}
 </style>
 </head>
 <body onload="load()">
-<h1>Aurora DSP</h1>
+<div class="top"><h1>Aurora DSP</h1><button class="mute" onclick="openWifi()">WiFi</button></div>
 <div id="msg"></div>
 <div id="main">
 <div id="presets" class="row"></div>
@@ -56,6 +63,15 @@ button:disabled{opacity:.4}
 <div id="slots"></div>
 <button id="add" class="wide" onclick="addSlot()">+ add</button>
 </div>
+<div id="wifi" style="display:none"><div class="box">
+<h2>Access point</h2>
+<div id="apwarn" style="display:none"></div>
+<label for="apname">Name (1-32 characters)</label><input type="text" id="apname" maxlength="32" autocomplete="off">
+<label for="apchannel">Channel (1-13)</label><input type="number" id="apchannel" min="1" max="13" inputmode="numeric">
+<label for="pwdap">Password (at least 8 characters, empty: open AP)</label><input type="password" id="pwdap" autocomplete="new-password">
+<div id="wmsg"></div>
+<div class="row"><button onclick="storeAp()">Store AP config</button><button onclick="closeWifi()">Close</button></div>
+</div></div>
 <script>
 var st=null,seq=0,seen=0,late=false,view=null,cf=null,cseq=0,csig="",ct=0,activePreset=-1;
 function say(t){document.getElementById("msg").textContent=t||"";}
@@ -312,6 +328,40 @@ function plot(){
   g.strokeStyle="#60c060";g.lineWidth=2;g.beginPath();
   for(var i=0;i<=240;i++){var f=20*Math.pow(1000,i/240),y=Y(mag(f));if(i)g.lineTo(X(f),y);else g.moveTo(X(f),y);}
   g.stroke();
+}
+
+// ---- WiFi dialog: the same checks, messages and open-AP warning as the settings UI (aurora.js)
+function wifiEl(id){return document.getElementById(id);}
+function wsay(t){wifiEl("wmsg").textContent=t||"";}
+function openWifi(){
+  wifiEl("wifi").style.display="block";wsay("");wifiEl("pwdap").value="";  // the password is never shown
+  return fetch("/wificonfig").then(function(r){return r.json();}).then(function(d){
+    wifiEl("apname").value=d.apname;wifiEl("apchannel").value=d.apchannel;
+    var w=wifiEl("apwarn");w.textContent=apWarningText(d);w.style.display=w.textContent?"block":"none";
+  }).catch(function(){wsay("Cannot read the WiFi settings");});
+}
+function closeWifi(){wifiEl("wifi").style.display="none";}
+function apWarningText(d){
+  if(!d.apopenfallback)return "";
+  return "Warning: the access point is running OPEN because the stored AP password is invalid"
+   +(d.appwderror?" ("+d.appwderror+")":"")+". Anyone nearby can reach this DSP. Store a valid AP password and restart.";
+}
+function apCheck(d){
+  if(d.pwdap.length>0&&d.pwdap.length<8)return "Please select a password with at least 8 characters.";
+  if(d.apname.length<1||d.apname.length>32)return "The name must have 1 to 32 characters.";
+  if(!(d.apchannel>=1&&d.apchannel<=13))return "The channel must be between 1 and 13.";
+  return "";
+}
+function storeAp(){
+  var d={pwdap:wifiEl("pwdap").value,apname:wifiEl("apname").value,apchannel:parseInt(wifiEl("apchannel").value,10)};
+  var e=apCheck(d);
+  if(e){wsay(e);return Promise.resolve();}
+  wsay("Storing...");
+  return fetch("/pwdap",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)})
+   .then(function(r){return r.text().then(function(t){
+     if(r.ok){wifiEl("pwdap").value="";wsay("Success! The configuration of the access point has been stored. It is applied after a restart.");}
+     else wsay("Not stored: "+t);});})
+   .catch(function(){wsay("Not stored: no answer from the DSP");});
 }
 </script>
 </body>
