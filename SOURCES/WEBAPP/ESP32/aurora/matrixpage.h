@@ -37,7 +37,8 @@ button:disabled{opacity:.4}
 #wifi input{box-sizing:border-box;width:100%;height:30px;margin-bottom:6px}
 #wifi .row button{flex:1 1 0;height:32px;border-top-width:1px}
 #apwarn{color:#ff6060;font-weight:bold}
-#wmsg{min-height:18px}
+#wmsg,#smsg{min-height:18px}
+#wstat{margin-bottom:6px;overflow-wrap:anywhere}
 </style>
 </head>
 <body onload="load()">
@@ -64,6 +65,12 @@ button:disabled{opacity:.4}
 <button id="add" class="wide" onclick="addSlot()">+ add</button>
 </div>
 <div id="wifi" style="display:none"><div class="box">
+<h2>WiFi network</h2>
+<div id="wstat"></div>
+<label for="ssid">Network name (SSID)</label><input type="text" id="ssid" maxlength="32" autocomplete="off" autocapitalize="none" spellcheck="false">
+<label for="pwd">Password (8-63 characters, empty: open network; the stored one is not shown)</label><input type="password" id="pwd" autocomplete="new-password">
+<div id="smsg"></div>
+<div class="row"><button onclick="joinWifi()">Join network</button><button onclick="forgetWifi()">Forget network</button></div>
 <h2>Access point</h2>
 <div id="apwarn" style="display:none"></div>
 <label for="apname">Name (1-32 characters)</label><input type="text" id="apname" maxlength="32" autocomplete="off">
@@ -333,14 +340,31 @@ function plot(){
 // ---- WiFi dialog: the same checks, messages and open-AP warning as the settings UI (aurora.js)
 function wifiEl(id){return document.getElementById(id);}
 function wsay(t){wifiEl("wmsg").textContent=t||"";}
+var wtimer=null;
 function openWifi(){
-  wifiEl("wifi").style.display="block";wsay("");wifiEl("pwdap").value="";  // the password is never shown
+  wifiEl("wifi").style.display="block";wsay("");ssay("");
+  wifiEl("pwdap").value="";wifiEl("pwd").value="";  // stored passwords are never shown
   return fetch("/wificonfig").then(function(r){return r.json();}).then(function(d){
+    wifiEl("ssid").value=d.ssid;
     wifiEl("apname").value=d.apname;wifiEl("apchannel").value=d.apchannel;
     var w=wifiEl("apwarn");w.textContent=apWarningText(d);w.style.display=w.textContent?"block":"none";
+    showWifiState(d);
   }).catch(function(){wsay("Cannot read the WiFi settings");});
 }
-function closeWifi(){wifiEl("wifi").style.display="none";}
+function closeWifi(){wifiEl("wifi").style.display="none";clearTimeout(wtimer);wtimer=null;}
+// Shows the connection state and keeps it fresh while the dialog is open; the inputs stay as typed.
+function showWifiState(d){
+  wifiEl("wstat").textContent=!d.ssid?"No WiFi network stored. The DSP is reachable on its access point."
+   :d.connected?"Connected to \""+d.ssid+"\", IP "+d.ip+". In that network the DSP is reachable at http://"+d.ip+"/; the access point stays available."
+   :"Not connected to \""+d.ssid+"\". The DSP keeps trying; the access point stays available.";
+  clearTimeout(wtimer);
+  wtimer=wifiEl("wifi").style.display=="block"?setTimeout(refreshWifiState,3000):null;
+}
+function refreshWifiState(){
+  wtimer=null;
+  return fetch("/wificonfig").then(function(r){return r.json();}).then(showWifiState)
+   .catch(function(){if(wifiEl("wifi").style.display=="block")wtimer=setTimeout(refreshWifiState,3000);});
+}
 function apWarningText(d){
   if(!d.apopenfallback)return "";
   return "Warning: the access point is running OPEN because the stored AP password is invalid"
@@ -362,6 +386,32 @@ function storeAp(){
      if(r.ok){wifiEl("pwdap").value="";wsay("Success! The configuration of the access point has been stored. It is applied after a restart.");}
      else wsay("Not stored: "+t);});})
    .catch(function(){wsay("Not stored: no answer from the DSP");});
+}
+// ---- Joining a WiFi: the same checks and messages as sendWifi() in aurora.js
+function ssay(t){wifiEl("smsg").textContent=t||"";}
+function wifiCheck(d){
+  if(d.ssid.length>32)return "The network name can have at most 32 characters.";
+  if((d.pwd.length>0&&d.pwd.length<8)||d.pwd.length>63)return "The WiFi password must have 8 to 63 characters, or be empty for an open network.";
+  return "";
+}
+function joinWifi(){
+  var d={ssid:wifiEl("ssid").value,pwd:wifiEl("pwd").value};
+  if(!d.ssid)d.pwd="";
+  var e=wifiCheck(d);
+  if(e){ssay(e);return Promise.resolve();}
+  return postWifi(d,"Stored. The DSP now joins \""+d.ssid+"\". Once connected, it is reachable in that network on the IP shown above; the access point stays available.");
+}
+function forgetWifi(){
+  wifiEl("ssid").value="";wifiEl("pwd").value="";
+  return postWifi({ssid:"",pwd:""},"The network has been forgotten. The DSP is now reachable on its access point only.");
+}
+function postWifi(d,ok){
+  ssay("Storing...");
+  return fetch("/wifi",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)})
+   .then(function(r){return r.text().then(function(t){
+     if(r.ok){wifiEl("pwd").value="";ssay(ok);}
+     else ssay("Not stored: "+t);});})
+   .catch(function(){ssay("Not stored: no answer from the DSP");});
 }
 </script>
 </body>

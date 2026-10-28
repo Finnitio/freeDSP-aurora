@@ -896,7 +896,12 @@ void handleGetWifiConfigJson( AsyncWebServerRequest* request )
   JsonVariant& jsonResponse = response->getRoot();
   jsonResponse["apname"] = Settings.apname;
   jsonResponse["apchannel"] = Settings.apchannel;
-  jsonResponse["ssid"] = Settings.ssid;
+  jsonResponse["ssid"] = Settings.ssid;  // the stored password is never sent
+  // Joined the stored network; ip is where the DSP is reachable there
+  const bool connected = WiFi.status() == WL_CONNECTED;
+  jsonResponse["connected"] = connected;
+  if( connected )
+    jsonResponse["ip"] = WiFi.localIP().toString();
   // AP runs open because the stored password is invalid (until restart with a valid one)
   jsonResponse["apopenfallback"] = (bool)apOpenFallback;
   if( apOpenFallback && apPasswordError )
@@ -1515,9 +1520,19 @@ void handlePostWifiConfigJson( JsonObject root )
 
 
   Settings.ssid = root["ssid"].as<String>();
-  Settings.password = root["pwd"].as<String>();
+  // An empty SSID forgets the network, password included
+  Settings.password = Settings.ssid.length() > 0 ? root["pwd"].as<String>() : String();
 
   writeSettings();
+}
+
+//==============================================================================
+/*! Checks the WiFi (STA) credentials before they are queued. Returns a message
+ *  for the UI or NULL.
+ */
+static const char* validatePostWifiConfigJson( JsonObject root )
+{
+  return staConfigError( root["ssid"].as<String>().c_str(), root["pwd"].as<String>().c_str() );
 }
 
 //==============================================================================
@@ -2026,7 +2041,7 @@ void setupWebserver (void)
   });
   server.on( "/wifi", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
   {
-    postJson( request, data, len, index, total, handlePostWifiConfigJson );
+    postJson( request, data, len, index, total, handlePostWifiConfigJson, 1024, validatePostWifiConfigJson );
   });
   server.on( "/pwdap", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
   {

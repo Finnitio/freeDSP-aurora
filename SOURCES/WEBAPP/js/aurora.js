@@ -220,10 +220,22 @@ function switchPreset(p){
 function sendWifi(){
   var data={};
   data.ssid=document.getElementById("ssid").value;
-  data.pwd=document.getElementById("pwd").value;
+  // an empty SSID forgets the network, password included
+  data.pwd=data.ssid.length>0 ? document.getElementById("pwd").value : "";
+  if(data.ssid.length>32){
+    alert("The network name can have at most 32 characters.");
+    return;
+  }
+  if(((data.pwd.length>0) && (data.pwd.length<8)) || (data.pwd.length>63)){
+    alert("The WiFi password must have 8 to 63 characters, or be empty for an open network.");
+    return;
+  }
   fetch("/wifi",{method:"POST",headers:{"Content-Type": "application/json"},body:JSON.stringify(data)})
   .then(function(response){
-    alert("Success! Your WiFi settings have been stored.");
+    if(response.ok)
+      alert("Success! Your WiFi settings have been stored.");
+    else
+      response.text().then(function(t){alert("Not stored: "+t);});
     return response;})
   .catch(function(err){console.log(err);});
 }

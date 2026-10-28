@@ -1,4 +1,4 @@
-// The WiFi dialog on the Matrix page: same checks, messages and warning as the settings UI.
+// The WiFi dialog on the Matrix page (joining a WiFi and the AP): same checks, messages and warning as the settings UI.
 // Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
 const assert = require("assert");
 const fs = require("fs");
@@ -9,7 +9,9 @@ const page = header.match(/<script>\n([\s\S]*?)<\/script>/)[1];
 const settings = fs.readFileSync("SOURCES/WEBAPP/js/aurora.js", "utf8");
 
 // Runs a page script with persistent fake elements; fetch answers from `replies` by URL.
+// Timers only fire on tick(), which runs the ones pending at that moment.
 function run(script, replies) {
+  let timers = [];
   const elements = {};
   const requests = [];
   const alerts = [];
@@ -33,12 +35,13 @@ function run(script, replies) {
         text: () => Promise.resolve(r.body),
       });
     },
-    setTimeout,
-    clearTimeout,
+    setTimeout(f) { const t = { f }; timers.push(t); return t; },
+    clearTimeout(t) { timers = timers.filter((x) => x !== t); },
   };
   vm.createContext(context);
   vm.runInContext(script, context);
-  return { context, elements, requests, alerts };
+  const tick = () => { const due = timers; timers = []; due.forEach((t) => t.f()); return due.length; };
+  return { context, elements, requests, alerts, replies, tick };
 }
 const settle = () => new Promise((r) => setImmediate(r));
 
@@ -143,6 +146,105 @@ async function closes() {
   assert.strictEqual(p.elements.wmsg.textContent, "", "a reopened dialog starts without an old message");
 }
 
+// Joining a WiFi: the settings UI's alert text is the expected message on the matrix page.
+async function rejectsInvalidWifiWithSettingsMessages() {
+  const cases = [
+    { ssid: "x".repeat(33), pwd: "secret123", msg: "The network name can have at most 32 characters." },
+    { ssid: "home", pwd: "1234567", msg: "The WiFi password must have 8 to 63 characters, or be empty for an open network." },
+    { ssid: "home", pwd: "p".repeat(64), msg: "The WiFi password must have 8 to 63 characters, or be empty for an open network." },
+  ];
+  for (const c of cases) {
+    const s = run(settings, {});
+    Object.assign(s.context.document.getElementById("ssid"), { value: c.ssid });
+    Object.assign(s.context.document.getElementById("pwd"), { value: c.pwd });
+    s.context.sendWifi();
+    assert.deepStrictEqual(s.alerts, [c.msg], "settings UI reference for " + JSON.stringify(c));
+    assert.strictEqual(s.requests.length, 0, "settings UI sends nothing for " + JSON.stringify(c));
+
+    const p = run(page, {});
+    Object.assign(p.context.document.getElementById("ssid"), { value: c.ssid });
+    Object.assign(p.context.document.getElementById("pwd"), { value: c.pwd });
+    await p.context.joinWifi();
+    assert.strictEqual(p.elements.smsg.textContent, c.msg, JSON.stringify(c));
+    assert.strictEqual(p.requests.length, 0, "nothing is sent for " + JSON.stringify(c));
+  }
+}
+
+async function joinsWifiAndKeepsTheAp() {
+  const p = run(page, {});
+  Object.assign(p.context.document.getElementById("ssid"), { value: "home" });
+  Object.assign(p.context.document.getElementById("pwd"), { value: "secret123" });
+  await p.context.joinWifi();
+  const posts = p.requests.filter((r) => r.url == "/wifi");
+  assert.strictEqual(posts.length, 1);
+  assert.strictEqual(posts[0].options.method, "POST");
+  assert.deepStrictEqual(JSON.parse(posts[0].options.body), { ssid: "home", pwd: "secret123" });
+  assert.strictEqual(p.elements.smsg.textContent,
+    "Stored. The DSP now joins \"home\". Once connected, it is reachable in that network on the IP shown above; the access point stays available.");
+  assert.strictEqual(p.elements.pwd.value, "", "the password is cleared after storing");
+
+  const q = run(page, { "/wifi": { status: 400, body: "WiFi name can have at most 32 characters" } });
+  Object.assign(q.context.document.getElementById("ssid"), { value: "home" });
+  await q.context.joinWifi();
+  assert.deepStrictEqual(JSON.parse(q.requests[0].options.body), { ssid: "home", pwd: "" }, "open network");
+  assert.strictEqual(q.elements.smsg.textContent, "Not stored: WiFi name can have at most 32 characters");
+}
+
+async function forgetsWifiAndKeepsTheAp() {
+  const p = run(page, {});
+  Object.assign(p.context.document.getElementById("ssid"), { value: "home" });
+  Object.assign(p.context.document.getElementById("pwd"), { value: "typed" });
+  await p.context.forgetWifi();
+  const posts = p.requests.filter((r) => r.url == "/wifi");
+  assert.strictEqual(posts.length, 1);
+  assert.deepStrictEqual(JSON.parse(posts[0].options.body), { ssid: "", pwd: "" }, "empty SSID ends the connection");
+  assert.strictEqual(p.elements.ssid.value, "");
+  assert.strictEqual(p.elements.pwd.value, "");
+  assert.strictEqual(p.elements.smsg.textContent,
+    "The network has been forgotten. The DSP is now reachable on its access point only.");
+}
+
+const wificonfig = (d) => ({ status: 200, body: JSON.stringify(Object.assign({ apname: "aurora", apchannel: 6, apopenfallback: false }, d)) });
+
+async function showsStoredNetworkAndConnection() {
+  const p = run(page, { "/wificonfig": wificonfig({ ssid: "home", connected: true, ip: "192.168.178.40" }) });
+  p.elements.pwd = { value: "typed-before", textContent: "", style: {} };
+  p.context.openWifi();
+  await settle();
+  assert.strictEqual(p.elements.ssid.value, "home", "the stored SSID is shown");
+  assert.strictEqual(p.elements.pwd.value, "", "the stored password is never shown, a previous entry is cleared");
+  assert.strictEqual(p.elements.wstat.textContent,
+    "Connected to \"home\", IP 192.168.178.40. In that network the DSP is reachable at http://192.168.178.40/; the access point stays available.");
+
+  const q = run(page, { "/wificonfig": wificonfig({ ssid: "home", connected: false }) });
+  q.context.openWifi();
+  await settle();
+  assert.strictEqual(q.elements.wstat.textContent, "Not connected to \"home\". The DSP keeps trying; the access point stays available.");
+
+  const r = run(page, { "/wificonfig": wificonfig({ ssid: "", connected: false }) });
+  r.context.openWifi();
+  await settle();
+  assert.strictEqual(r.elements.ssid.value, "");
+  assert.strictEqual(r.elements.wstat.textContent, "No WiFi network stored. The DSP is reachable on its access point.");
+}
+
+// While the dialog is open the connection state is refreshed; typed entries stay.
+async function refreshesConnectionWhileOpen() {
+  const p = run(page, { "/wificonfig": wificonfig({ ssid: "", connected: false }) });
+  p.context.openWifi();
+  await settle();
+  p.elements.ssid.value = "home";
+  p.replies["/wificonfig"] = wificonfig({ ssid: "home", connected: true, ip: "10.0.0.7" });
+  assert(p.tick() > 0, "a refresh is pending while the dialog is open");
+  await settle();
+  assert(/IP 10\.0\.0\.7/.test(p.elements.wstat.textContent), p.elements.wstat.textContent);
+  assert.strictEqual(p.elements.ssid.value, "home", "the typed SSID is not overwritten");
+  assert.strictEqual(p.elements.apname.value, "aurora");
+
+  p.context.closeWifi();
+  assert.strictEqual(p.tick(), 0, "no refresh once the dialog is closed");
+}
+
 async function main() {
   await opensWithCurrentApConfig();
   await showsOpenApWarningLikeSettings();
@@ -150,6 +252,11 @@ async function main() {
   await storesValidConfigWithRestartNote();
   await showsFirmwareRefusal();
   await closes();
+  await rejectsInvalidWifiWithSettingsMessages();
+  await joinsWifiAndKeepsTheAp();
+  await forgetsWifiAndKeepsTheAp();
+  await showsStoredNetworkAndConnection();
+  await refreshesConnectionWhileOpen();
   console.log("all tests passed");
 }
 

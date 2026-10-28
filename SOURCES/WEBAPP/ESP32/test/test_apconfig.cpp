@@ -1,4 +1,4 @@
-// Host tests for AP config validation and captive-portal answers.
+// Host tests for AP and WiFi (STA) config validation and captive-portal answers.
 // Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
 #include <cassert>
 #include <cstdio>
@@ -96,6 +96,21 @@ static void displayWarnsWhileTheApRunsOpenByFallback()
   assert(strcmp(line, "Not Connected") == 0);
 }
 
+static void wifiCredentialsAreChecked()
+{
+  assert(staConfigError("home", "secret123") == NULL);
+  assert(staConfigError("home", "") == NULL);                           // open network
+  assert(staConfigError("", "") == NULL);                               // forget the network
+  assert(staConfigError(std::string(32, 'a').c_str(), std::string(63, 'p').c_str()) == NULL);
+
+  const char* msg = staConfigError(std::string(33, 'a').c_str(), "secret123");
+  assert(msg != NULL && strstr(msg, "32") != NULL);
+  msg = staConfigError("home", "1234567");
+  assert(msg != NULL && strstr(msg, "8") != NULL);
+  assert(staConfigError("home", std::string(64, 'p').c_str()) != NULL);
+  assert(staConfigError("", "leftover") == NULL);                       // forgetting ignores the password
+}
+
 int main()
 {
   validConfigIsAccepted();
@@ -107,6 +122,7 @@ int main()
   invalidPasswordFallsBackToAnOpenAp();
   invalidNameAndChannelFallBackToDefaults();
   displayWarnsWhileTheApRunsOpenByFallback();
+  wifiCredentialsAreChecked();
   printf("all tests passed\n");
   return 0;
 }
