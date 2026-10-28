@@ -702,18 +702,18 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
       return std::string( "unknown field " ) + key;
   }
 
-  Snapshot before;
-  snapshot( before );
-  saveUndo();
-
-  // A joining Channel takes the enabled aspects from the group's first existing member.
+  // A joining Channel takes the enabled aspects from the group's first existing member, so it
+  // cannot set them in the same patch.
   if( linkChanged && next.link >= 0 )
   {
-    Channel* list = isBus ? bus_ : out_;
+    const Channel* list = isBus ? bus_ : out_;
     const int count = isBus ? nbus_ : nout_;
     const LinkGroup& group = isBus ? busLink_ : outLink_[next.link];
     for( int i = 0; i < count; i++ ) if( i != idx && list[i].link == next.link )
     {
+      const char* taken = group.mute && muteChanged ? "mute" : group.gain && gainChanged ? "gain"
+        : group.delay && delayChanged ? "delay" : group.filters && slotChanged ? "filters" : NULL;
+      if( taken ) return std::string( "a Channel joining a link group takes over its linked " ) + taken;
       if( group.mute ) next.mute = list[i].mute;
       if( group.gain ) { next.gain = list[i].gain; next.gainBypass = list[i].gainBypass; }
       if( group.delay ) { next.delay = list[i].delay; next.delayBypass = list[i].delayBypass; }
@@ -721,6 +721,10 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
       break;
     }
   }
+
+  Snapshot before;
+  snapshot( before );
+  saveUndo();
   (isBus ? bus_[idx] : out_[idx]) = next;
 
   if( next.link >= 0 )

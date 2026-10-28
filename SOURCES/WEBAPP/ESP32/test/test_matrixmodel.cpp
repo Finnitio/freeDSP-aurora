@@ -1368,6 +1368,34 @@ static void linkedAspectsPropagateAndJoiningCopiesAbsoluteValues()
   assert(st["outs"][0]["mute"] == false && st["outs"][1]["mute"] == true); // leaving keeps its value
 }
 
+// Spec 45: a joiner takes over the group's linked settings, so a patch that joins and
+// also sets a linked aspect is ambiguous and rejected; unlinked aspects are fine.
+static void joiningRejectsLinkedSettingsInTheSamePatch()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"mute\":false,\"gain\":-3,\"link\":\"A\"}").empty());
+  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"A\",\"mute\":true,\"gain\":true}").empty());
+  const std::string before = m.savePreset();
+  port.w.clear();
+  std::string err = patch(m, "{\"ch\":\"out\",\"idx\":1,\"gain\":4,\"link\":\"A\"}");
+  assert(err == "a Channel joining a link group takes over its linked gain");
+  err = patch(m, "{\"ch\":\"out\",\"idx\":1,\"link\":\"A\",\"mute\":true}");
+  assert(err == "a Channel joining a link group takes over its linked mute");
+  assert(port.w.empty() && m.savePreset() == before);
+
+  // delay is not linked in A: allowed, and the gain is taken over
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"delayUs\":1000,\"link\":\"A\"}").empty());
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["outs"][1]["gain"] == -3 && st["outs"][1]["delaySamples"] == 48);
+  // already a member: editing a linked aspect together with the same link is an ordinary edit
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"gain\":2,\"link\":\"A\"}").empty());
+  assert(stateOf(m)["outs"][0]["gain"] == 2);
+  // first member of an empty group: nothing to take over
+  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"C\",\"gain\":true}").empty());
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":5,\"gain\":-1,\"link\":\"C\"}").empty());
+}
+
 static void eachLinkAspectCanBeEnabledIndependently()
 {
   FakePort port;
@@ -1429,6 +1457,7 @@ int main()
 {
   linkMembershipHasSeparateBusAndOutputScopes();
   linkedAspectsPropagateAndJoiningCopiesAbsoluteValues();
+  joiningRejectsLinkedSettingsInTheSamePatch();
   eachLinkAspectCanBeEnabledIndependently();
   enablingAnAspectMakesExistingMembersConsistent();
   linkGroupsRoundTripAndUndoTogether();

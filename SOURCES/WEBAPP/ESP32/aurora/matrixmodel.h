@@ -65,7 +65,8 @@ public:
    *  or "lr" (order 2, 4, 8), default order 2; shelf slope 0.1-1.
    *  SPDIF out: {"ch":"spdif","sel":code} with the left code of one of the offered pairs (stateJson "spdifopts").
    *  Link settings: {"ch":"link","scope":"bus"|"out","group":"bus"|"A".."D",
-   *  "mute"|"filters"|"gain"|"delay":bool}. Buses cannot link delay.
+   *  "mute"|"filters"|"gain"|"delay":bool}. Buses cannot link delay. A Channel joining a group takes
+   *  over its linked aspects, so a patch that joins cannot also set them.
    *  Slots sit on the Channel's biquads in the order added, each taking cost() of them: Butterworth
    *  order n = ceil(n/2), Linkwitz-Riley order n = n/2, everything else 1. An add or a type/order
    *  change that would exceed the budget is rejected.
