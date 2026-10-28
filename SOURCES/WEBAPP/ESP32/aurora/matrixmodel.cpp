@@ -278,7 +278,8 @@ void MatrixModel::writeStages( MatrixChannelKind kind, int idx, const Channel& c
 }
 
 /*! True if the edit rewrites any biquad: a new coefficient on running filter state can click,
- *  and a multi-biquad rewrite would briefly run a mix of old and new Slots (spec 37). */
+ *  and a multi-biquad rewrite would briefly run a mix of old and new Slots
+ *  (spec "Live apply", user story 37; ticket 29). */
 bool MatrixModel::needsRamp( const Channel& before, const Channel& after ) const
 {
   std::vector<Coef> was, now;
