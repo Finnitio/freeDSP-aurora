@@ -46,6 +46,51 @@ async function main() {
     preset: 2,
     mute: true,
   });
+
+  context.st = {
+    buses: [{ gain: 12, gainBypass: false, slots: [] }],
+    outs: [{ gain: -7.5, gainBypass: false, slots: [] }],
+  };
+  context.cf = { fs: 48000, bq: [[1, 0, 0, 0, 0]] };
+  context.view = { ch: "bus", idx: 0 };
+  assert.strictEqual(context.mag(1000), 12,
+    "a Bus with no active filtering plots its positive Channel gain");
+
+  context.view = { ch: "out", idx: 0 };
+  assert.strictEqual(context.mag(1000), -7.5,
+    "an Output with no active filtering plots its negative Channel gain");
+  context.st.outs[0].gainBypass = true;
+  assert.strictEqual(context.mag(1000), 0,
+    "gain bypass plots unity without clearing the stored gain");
+  assert.strictEqual(context.st.outs[0].gain, -7.5);
+  context.st.outs[0].gainBypass = false;
+  assert.strictEqual(context.mag(1000), -7.5,
+    "disabling bypass restores the stored gain contribution");
+
+  context.st.buses[0].gain = 3;
+  context.view = { ch: "bus", idx: 0 };
+  context.cf.bq = [[0.5000000596046448, 0, 0, 0, 0]];
+  assert(Math.abs(context.mag(1000) - -3.0205988778409525) < 1e-12,
+    "effective gain combines with the firmware-provided quantized Slot response");
+
+  const scheduled = [];
+  context.setTimeout = (fn) => { scheduled.push(fn); return scheduled.length; };
+  context.coeffs = () => {};
+  context.st.gainmin = -80;
+  context.st.gainmax = 12;
+  context.st.choices = [{ c: 1 }];
+  context.st.peq = { fmin: 20, fmax: 20000 };
+  context.drawF();
+  scheduled.shift()();
+  context.st.buses[0].gain = 4;
+  context.drawF();
+  assert.strictEqual(scheduled.length, 1,
+    "a live gain state change schedules a fresh plot response without a Slot edit");
+  scheduled.shift()();
+  context.st.buses[0].gainBypass = true;
+  context.drawF();
+  assert.strictEqual(scheduled.length, 1,
+    "toggling gain bypass schedules a fresh plot response without a Slot edit");
   console.log("matrix page tests passed");
 }
 

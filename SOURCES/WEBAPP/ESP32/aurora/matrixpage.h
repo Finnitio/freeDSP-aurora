@@ -264,7 +264,7 @@ function drawF(){
   document.getElementById("ftitle").textContent=c.name;
   document.getElementById("budget").textContent="Biquads: "+c.used+" of "+c.budget+" used, "+c.free+" free";
   document.getElementById("add").disabled=!st.choices.some(function(o){return o.c<=c.free;});  // nothing fits any more
-  var sig=JSON.stringify(c.slots);  // the plot depends on the Slots only
+  var sig=JSON.stringify({gain:c.gain,gainBypass:c.gainBypass,slots:c.slots});
   if(sig!=csig){csig=sig;if(!ct)ct=setTimeout(function(){ct=0;if(view)coeffs();},150);}
   if(busy("#slots,#top")){late=true;refreshLabels(c);return;}
   late=false;
@@ -289,7 +289,7 @@ function coeffs(){
 }
 // Magnitude of the firmware's (8.24 quantized) biquads, H=(b0+b1z^-1+b2z^-2)/(1-a1z^-1-a2z^-2).
 function mag(f){
-  var w=2*Math.PI*f/cf.fs,c1=Math.cos(w),s1=Math.sin(w),c2=Math.cos(2*w),s2=Math.sin(2*w),db=0;
+  var c=chan(),w=2*Math.PI*f/cf.fs,c1=Math.cos(w),s1=Math.sin(w),c2=Math.cos(2*w),s2=Math.sin(2*w),db=c.gainBypass?0:c.gain;
   cf.bq.forEach(function(q){
     var nr=q[0]+q[1]*c1+q[2]*c2,ni=-q[1]*s1-q[2]*s2,dr=1-q[3]*c1-q[4]*c2,di=q[3]*s1+q[4]*s2;
     db+=10*Math.log10((nr*nr+ni*ni)/(dr*dr+di*di));
