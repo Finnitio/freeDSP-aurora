@@ -683,6 +683,53 @@ static void parameterEditsOfAMultiBiquadSlotStayLive()
     assert(port.events[k].type == 'b');
 }
 
+static std::vector<Write> only(const FakePort& port, char type);
+
+static int countEvents(const FakePort& port, char type)
+{
+  int n = 0;
+  for (size_t k = 0; k < port.events.size(); k++)
+    if (port.events[k].type == type)
+      n++;
+  return n;
+}
+
+// A patch ramps each Channel at most once: down, one wait, every write, up.
+static void routeSwitchAndLayoutChangeRampOnce()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"mute\":false,\"gain\":-6}").empty());
+  port.events.clear(); port.w.clear();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"route\":2,\"slot\":{\"op\":\"add\",\"type\":\"lp\",\"design\":\"lr\",\"order\":4}}").empty());
+  assert(countEvents(port, 'w') == 1);
+  assert(countEvents(port, 'g') == 2);
+  assert(port.events.front().type == 'g' && port.events.front().val == 0.0);
+  assert(port.events[1].type == 'w');
+  assert(port.events.back().type == 'g' && near(port.events.back().val, std::pow(10.0, -6.0 / 20)));
+  assert(countEvents(port, 'b') == 2 && only(port, 'r').size() == 1);
+}
+
+// Linked members ramp together: all down, one wait, all writes, all up.
+static void linkedLayoutChangeRampsMembersTogether()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  for (int o = 2; o < 4; o++)
+    assert(patch(m, ("{\"ch\":\"out\",\"idx\":" + std::to_string(o) + ",\"mute\":false,\"link\":\"B\"}").c_str()).empty());
+  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"B\",\"filters\":true}").empty());
+  port.events.clear();
+  assert(addSlot(m, "\"type\":\"hp\",\"design\":\"lr\",\"order\":4", "out", 2).empty());
+  assert(port.events.size() == 2 + 1 + 4 + 2);
+  assert(port.events[0].type == 'g' && port.events[0].val == 0.0 && port.events[0].idx == 2);
+  assert(port.events[1].type == 'g' && port.events[1].val == 0.0 && port.events[1].idx == 3);
+  assert(port.events[2].type == 'w');
+  for (int k = 3; k < 7; k++)
+    assert(port.events[k].type == 'b');
+  assert(port.events[7].type == 'g' && near(port.events[7].val, 1.0) && port.events[7].idx == 2);
+  assert(port.events[8].type == 'g' && near(port.events[8].val, 1.0) && port.events[8].idx == 3);
+}
+
 static void bypassOfAMultiBiquadSlotKeepsItsStages()
 {
   FakePort port;
@@ -1401,6 +1448,8 @@ int main()
   slotsArepackedInOrder();
   multiBiquadEditsAreRampedAndSingleBiquadEditsStayLive();
   parameterEditsOfAMultiBiquadSlotStayLive();
+  routeSwitchAndLayoutChangeRampOnce();
+  linkedLayoutChangeRampsMembersTogether();
   bypassOfAMultiBiquadSlotKeepsItsStages();
   typeCoefficientsGiveTheExpectedResponse();
   slopeChangesTheShelf();

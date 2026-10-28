@@ -239,31 +239,32 @@ bool MatrixModel::layoutChanged( const Channel& before, const Channel& after )
   return false;
 }
 
-/*! Writes the biquads that differ from prev (all of them if prev is NULL). A layout change
- *  that rewrites several biquads ramps the Channel around them; parameter edits are safeloaded live. */
+/*! Writes the biquads that differ from prev (all of them if prev is NULL). */
 void MatrixModel::writeStages( MatrixChannelKind kind, int idx, const Channel& c, const Channel* prev )
 {
   std::vector<Coef> now, before;
   stages( c, now );
   if( prev )
     stages( *prev, before );
-  int changed = 0;
-  for( int s = 0; s < nbiquad_; s++ )
-    if( !prev || memcmp( &now[s], &before[s], sizeof( Coef ) ) != 0 )
-      changed++;
-
-  const double restore = linear( c );
-  const bool ramp = prev && changed > 1 && restore != 0.0 && layoutChanged( *prev, c );
-  if( ramp )
-  {
-    port_.writeGain( kind, idx, 0.0 );
-    port_.waitMs( MATRIX_RAMP_MS );
-  }
   for( int s = 0; s < nbiquad_; s++ )
     if( !prev || memcmp( &now[s], &before[s], sizeof( Coef ) ) != 0 )
       port_.writeBiquad( kind, idx, s, now[s].a, now[s].b );
-  if( ramp )
-    port_.writeGain( kind, idx, restore );
+}
+
+/*! True if the edit lets the Channel briefly run a mix of old and new Slots: the layout
+ *  changed and more than one biquad is rewritten. Parameter edits are safeloaded live. */
+bool MatrixModel::needsRamp( const Channel& before, const Channel& after ) const
+{
+  if( !layoutChanged( before, after ) )
+    return false;
+  std::vector<Coef> was, now;
+  stages( before, was );
+  stages( after, now );
+  int changed = 0;
+  for( int s = 0; s < nbiquad_; s++ )
+    if( memcmp( &was[s], &now[s], sizeof( Coef ) ) != 0 )
+      changed++;
+  return changed > 1;
 }
 
 /*! Slot edit of a patch; changes only c, and only if it returns "". */
@@ -421,49 +422,65 @@ double MatrixModel::linear( const Channel& c ) const
   return c.mute ? 0.0 : c.gainBypass ? 1.0 : pow( 10.0, c.gain / 20.0 );
 }
 
-void MatrixModel::writeChannelChanges( bool isBus, int idx, const Channel& before, const Channel& after )
+/*! Writes what differs from the snapshot. Channels that switch their route or Source, or change
+ *  their Slot layout, ramp together: all down, one wait, every write, all up. */
+void MatrixModel::writeChanges( const Snapshot& before )
 {
-  const MatrixChannelKind kind = isBus ? MATRIX_BUS : MATRIX_OUT;
-  const double lin = linear( after );
-  const bool switched = after.sel != before.sel;
-  std::vector<Coef> beforeStages, afterStages;
-  stages( before, beforeStages );
-  stages( after, afterStages );
-  int changedStages = 0;
-  for( int s = 0; s < nbiquad_; s++ )
-    if( memcmp( &beforeStages[s], &afterStages[s], sizeof( Coef ) ) != 0 )
-      changedStages++;
-  const bool filtersRamp = changedStages > 1 && lin != 0.0 && layoutChanged( before, after );
-  if( switched && lin != 0.0 )
+  bool ramp[MATRIX_MAX_BUS + MATRIX_MAX_OUT];
+  bool anyRamp = false;
+  for( int n = 0; n < nbus_ + nout_; n++ )
   {
-    port_.writeGain( kind, idx, 0.0 );
-    port_.waitMs( MATRIX_RAMP_MS );
-    if( isBus ) port_.writeSource( idx, (uint32_t)after.sel ); else port_.writeRoute( idx, after.sel );
-    port_.writeGain( kind, idx, lin );
-  }
-  else
-  {
-    // writeStages() restores the new gain after its own ramp, so do not write it twice.
-    if( lin != linear( before ) && !filtersRamp ) port_.writeGain( kind, idx, lin );
-    if( switched )
+    const MatrixChannelKind kind = n < nbus_ ? MATRIX_BUS : MATRIX_OUT;
+    const int idx = n < nbus_ ? n : n - nbus_;
+    const Channel& was = kind == MATRIX_BUS ? before.bus[idx] : before.out[idx];
+    const Channel& now = kind == MATRIX_BUS ? bus_[idx] : out_[idx];
+    ramp[n] = linear( now ) != 0.0 && ( now.sel != was.sel || needsRamp( was, now ) );
+    if( ramp[n] )
     {
-      if( isBus ) port_.writeSource( idx, (uint32_t)after.sel ); else port_.writeRoute( idx, after.sel );
+      port_.writeGain( kind, idx, 0.0 );
+      anyRamp = true;
     }
   }
-  if( !isBus )
+  if( anyRamp )
+    port_.waitMs( MATRIX_RAMP_MS );
+  for( int n = 0; n < nbus_ + nout_; n++ )
   {
-    if( after.polarity != before.polarity ) port_.writePolarity( idx, after.polarity );
-    if( ( after.delayBypass ? 0 : after.delay ) != ( before.delayBypass ? 0 : before.delay ) )
-      port_.writeDelay( idx, after.delayBypass ? 0 : after.delay );
+    const MatrixChannelKind kind = n < nbus_ ? MATRIX_BUS : MATRIX_OUT;
+    const int idx = n < nbus_ ? n : n - nbus_;
+    const Channel& was = kind == MATRIX_BUS ? before.bus[idx] : before.out[idx];
+    const Channel& now = kind == MATRIX_BUS ? bus_[idx] : out_[idx];
+    if( !ramp[n] && linear( now ) != linear( was ) ) port_.writeGain( kind, idx, linear( now ) );
+    if( now.sel != was.sel )
+    {
+      if( kind == MATRIX_BUS ) port_.writeSource( idx, (uint32_t)now.sel ); else port_.writeRoute( idx, now.sel );
+    }
+    if( kind == MATRIX_OUT )
+    {
+      if( now.polarity != was.polarity ) port_.writePolarity( idx, now.polarity );
+      if( ( now.delayBypass ? 0 : now.delay ) != ( was.delayBypass ? 0 : was.delay ) )
+        port_.writeDelay( idx, now.delayBypass ? 0 : now.delay );
+    }
+    bool slotsChanged = now.slots.size() != was.slots.size();
+    for( size_t i = 0; !slotsChanged && i < now.slots.size(); i++ )
+    {
+      const Slot& a = now.slots[i]; const Slot& b = was.slots[i];
+      slotsChanged = a.bypass != b.bypass || a.type != b.type || a.lr != b.lr || a.order != b.order
+        || a.freq != b.freq || a.q != b.q || a.gain != b.gain || a.slope != b.slope;
+    }
+    if( slotsChanged ) writeStages( kind, idx, now, &was );
   }
-  bool slotsChanged = after.slots.size() != before.slots.size();
-  for( size_t i = 0; !slotsChanged && i < after.slots.size(); i++ )
+  for( int n = 0; n < nbus_ + nout_; n++ )
   {
-    const Slot& a = after.slots[i]; const Slot& b = before.slots[i];
-    slotsChanged = a.bypass != b.bypass || a.type != b.type || a.lr != b.lr || a.order != b.order
-      || a.freq != b.freq || a.q != b.q || a.gain != b.gain || a.slope != b.slope;
+    const MatrixChannelKind kind = n < nbus_ ? MATRIX_BUS : MATRIX_OUT;
+    const int idx = n < nbus_ ? n : n - nbus_;
+    if( ramp[n] ) port_.writeGain( kind, idx, linear( kind == MATRIX_BUS ? bus_[idx] : out_[idx] ) );
   }
-  if( slotsChanged ) writeStages( kind, idx, after, &before );
+}
+
+void MatrixModel::snapshot( Snapshot& s ) const
+{
+  for( int b = 0; b < nbus_; b++ ) s.bus[b] = bus_[b];
+  for( int o = 0; o < nout_; o++ ) s.out[o] = out_[o];
 }
 //==============================================================================
 std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
@@ -505,9 +522,8 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
     }
     if( !touched ) return "missing link setting";
 
-    Channel beforeBus[MATRIX_MAX_BUS], beforeOut[MATRIX_MAX_OUT];
-    for( int b = 0; b < nbus_; b++ ) beforeBus[b] = bus_[b];
-    for( int o = 0; o < nout_; o++ ) beforeOut[o] = out_[o];
+    Snapshot before;
+    snapshot( before );
     LinkGroup old = isBus ? busLink_ : outLink_[group];
     saveUndo();
     ( isBus ? busLink_ : outLink_[group] ) = next;
@@ -529,8 +545,7 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
       if( next.delay && !old.delay ) { c.delay = anchor->delay; c.delayBypass = anchor->delayBypass; }
       if( next.filters && !old.filters ) c.slots = anchor->slots;
     }
-    for( int b = 0; b < nbus_; b++ ) writeChannelChanges( true, b, beforeBus[b], bus_[b] );
-    for( int o = 0; o < nout_; o++ ) writeChannelChanges( false, o, beforeOut[o], out_[o] );
+    writeChanges( before );
     dirty_ = true;
     lastChange_ = nowMs;
     return "";
@@ -674,9 +689,8 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
       return std::string( "unknown field " ) + key;
   }
 
-  Channel beforeBus[MATRIX_MAX_BUS], beforeOut[MATRIX_MAX_OUT];
-  for( int b = 0; b < nbus_; b++ ) beforeBus[b] = bus_[b];
-  for( int o = 0; o < nout_; o++ ) beforeOut[o] = out_[o];
+  Snapshot before;
+  snapshot( before );
   saveUndo();
 
   // A joining Channel takes the enabled aspects from the group's first existing member.
@@ -709,8 +723,7 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
       if( group.filters && slotChanged ) list[i].slots = next.slots;
     }
   }
-  for( int b = 0; b < nbus_; b++ ) writeChannelChanges( true, b, beforeBus[b], bus_[b] );
-  for( int o = 0; o < nout_; o++ ) writeChannelChanges( false, o, beforeOut[o], out_[o] );
+  writeChanges( before );
 
   const bool switched = next.sel != prev.sel;
   if( slotChanged || linkChanged || next.name != prev.name || next.mute != prev.mute || next.gain != prev.gain || switched

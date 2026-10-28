@@ -156,7 +156,14 @@ private:
   std::string applySlot( JsonObject op, Channel& c ) const;
   void stages( const Channel& c, std::vector<Coef>& out ) const;
   void writeStages( MatrixChannelKind kind, int idx, const Channel& c, const Channel* prev );
-  void writeChannelChanges( bool isBus, int idx, const Channel& before, const Channel& after );
+  struct Snapshot
+  {
+    Channel bus[MATRIX_MAX_BUS];
+    Channel out[MATRIX_MAX_OUT];
+  };
+  bool needsRamp( const Channel& before, const Channel& after ) const;
+  void snapshot( Snapshot& s ) const;
+  void writeChanges( const Snapshot& before );
   void putChannel( JsonArray arr, const Channel& c, const char* selKey, bool withLimits ) const;
   std::string readChannel( JsonObject o, bool isBus, Channel& c ) const;
 
