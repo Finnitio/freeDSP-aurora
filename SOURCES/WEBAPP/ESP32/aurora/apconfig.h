@@ -2,6 +2,7 @@
 #define APCONFIG_H_
 
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 //==============================================================================
@@ -28,6 +29,55 @@ static inline const char* apConfigError( const char* pwd, const char* name, int 
   if( channel < 1 || channel > 13 )
     return "AP channel must be between 1 and 13";
   return NULL;
+}
+
+//------------------------------------------------------------------------------
+/*! How the AP is started from the stored settings, which may be invalid
+ *  (older file, edited by hand). Name and channel fall back to their
+ *  defaults. An invalid password falls back to an open AP so the web UI
+ *  stays reachable (docs/adr: open AP fallback); the stored password is
+ *  left untouched.
+ */
+struct ApPlan
+{
+  const char* name;
+  int channel;
+  const char* pwd;        //!< NULL = open AP
+  bool openFallback;      //!< open only because the stored password is invalid
+  const char* nameError;  //!< why name/channel were defaulted, or NULL
+  const char* pwdError;   //!< why the password was dropped, or NULL
+};
+
+static inline ApPlan apPlan( const char* pwd, const char* name, int channel, const char* defaultName )
+{
+  ApPlan plan = { name, channel, NULL, false, NULL, NULL };
+  plan.nameError = apConfigError( "", name, channel );
+  if( plan.nameError )
+  {
+    plan.name = defaultName;
+    plan.channel = AP_CHANNEL_DEFAULT;
+  }
+  plan.pwdError = apConfigError( pwd, plan.name, plan.channel );
+  plan.openFallback = plan.pwdError != NULL;
+  if( !plan.openFallback && pwd[0] != '\0' )
+    plan.pwd = pwd;
+  return plan;
+}
+
+//------------------------------------------------------------------------------
+/*! Bottom line of the display: the IP, or a warning while the AP runs open
+ *  because the stored password is invalid. Fits 25 characters (5x7 font).
+ */
+static const size_t AP_STATUS_LINE_SIZE = 26;
+
+static inline void apStatusLine( char* line, size_t size, const char* ip, bool connected, bool openFallback )
+{
+  if( !openFallback )
+    snprintf( line, size, "%s", ip );
+  else if( connected )
+    snprintf( line, size, "OPEN AP! %s", ip );
+  else
+    snprintf( line, size, "OPEN AP: invalid password" );
 }
 
 //------------------------------------------------------------------------------

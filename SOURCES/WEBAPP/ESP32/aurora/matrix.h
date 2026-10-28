@@ -3,6 +3,7 @@
 
 #include <string>
 #include <ArduinoJson.h>
+#include "matrixmodel.h"
 
 /*! Firmware side of the matrix plugin: owns the MatrixModel, turns its writes
  *  into DSP parameter writes (on the I2C worker) and keeps the preset files.
@@ -24,9 +25,11 @@ void matrixLoadPreset( void );
 bool matrixBeginPresetSwitch( void );
 void matrixEndPresetSwitch( void );
 
-/*! Applies a patch. Returns true and the new state, or false and the reason. The
- *  DSP writes are queued for the I2C worker, so this is safe in a web handler. */
-bool matrixApply( JsonObject patch, std::string& reply );
+/*! Applies a live edit and returns whether it was accepted, a bad request or a
+ *  conflict (Preset switch in progress or stale "preset"); on success state is the
+ *  new state. The DSP writes are queued for the I2C worker, so this is safe in a
+ *  web handler. */
+MatrixEditResult matrixApply( JsonObject patch, std::string& state );
 
 std::string matrixState( void );
 

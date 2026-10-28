@@ -22,6 +22,10 @@ bool i2cIdle( void );
 void i2cLock( void );
 void i2cUnlock( void );
 
+/*! Takes the bus mutex only if it is free right now. loop() uses this so it
+ *  never waits while the worker runs a long job. Release with i2cUnlock(). */
+bool i2cTryLock( void );
+
 /*! Holds the (recursive) bus mutex for the scope. */
 class I2cLock
 {

@@ -33,6 +33,7 @@
 #include "apconfig.h"
 #include "i2cworker.h"
 #include "matrix.h"
+#include "pendingredraw.h"
 
 /**
  * These are required for the espmake32 automatic library resolver
@@ -50,6 +51,9 @@
 File fileDspProgram;
 
 bool changeWifiState = false;
+// Set by startAP(): the AP runs open because the stored password is invalid
+volatile bool apOpenFallback = false;
+const char* apPasswordError = NULL;  //!< why, while apOpenFallback is set
 DNSServer dnsServer;
 
 //------------------------------------------------------------------------------
@@ -184,26 +188,43 @@ void uploadDspFirmware( void )
 }
 
 #if HAVE_DISPLAY
+static String uiStatusLine( void )
+{
+  bool connected = WiFi.status() == WL_CONNECTED;
+  String ip = connected ? WiFi.localIP().toString() : String( F("Not Connected") );
+  char line[AP_STATUS_LINE_SIZE];
+  apStatusLine( line, sizeof( line ), ip.c_str(), connected, apOpenFallback );
+  return String( line );
+}
+
 //==============================================================================
-/*! Updates the user interface on the display
- *
+/*! Updates the user interface on the display. Waits for the bus, so it is for
+ *  setup() and worker jobs; loop() requests a redraw from pendingRedraw instead.
  */
 void updateUI( void )
 {
   if(haveDisplay)
   {
-    String ip;
-    if( WiFi.status() != WL_CONNECTED )
-      ip = "Not Connected";
-    else
-      ip = WiFi.localIP().toString();
-
     if( (editMode == 0) || (editMode == 1) || (editMode == 2) )
-    {
-      myDisplay.drawUI(currentPlugInName.c_str(), ip.c_str(), currentPreset, masterVolume.val, editMode);
-    }
-
+      myDisplay.drawUI(currentPlugInName.c_str(), uiStatusLine().c_str(), currentPreset, masterVolume.val, editMode);
   }
+}
+
+//==============================================================================
+/*! The redraw loop() owes. Drawn only when the bus is free, so loop() never
+ *  waits for a preset load or FIR upload on the worker.
+ */
+static PendingRedraw pendingRedraw;
+
+static bool tryDrawScreen( PendingRedraw::Screen screen )
+{
+  if( !haveDisplay )
+    return true;
+  if( screen == PendingRedraw::SWITCHING_PRESET )
+    return myDisplay.tryDrawSwitchingPreset();
+  if( (editMode == 0) || (editMode == 1) || (editMode == 2) )
+    return myDisplay.tryDrawUI(currentPlugInName.c_str(), uiStatusLine().c_str(), currentPreset, masterVolume.val, editMode);
+  return true;
 }
 #endif
 
@@ -216,46 +237,43 @@ static void startAP()
   IPAddress ip(192, 168, 5, 1);
   IPAddress subnet(255, 255, 255, 0);
 
-  // Settings from an older file or edited by hand may be invalid
-  String name = Settings.apname;
-  String pwd = Settings.pwdap;
-  int channel = Settings.apchannel;
-  // Name and channel fall back to their defaults; the password never does
-  const char* err = apConfigError("", name.c_str(), channel);
-  if(err)
+  // Settings from an older file or edited by hand may be invalid.
+  // Copies: the web task may replace Settings while the plan points into them.
+  const String name = Settings.apname;
+  const String pwd = Settings.pwdap;
+  const ApPlan plan = apPlan(pwd.c_str(), name.c_str(), Settings.apchannel, AP_HOSTNAME);
+  if(plan.nameError)
   {
     Serial.print(F("[ERROR] AP settings: "));
-    Serial.println(err);
+    Serial.println(plan.nameError);
     Serial.println(F("Falling back to the default AP name and channel"));
-    name = AP_HOSTNAME;
-    channel = AP_CHANNEL_DEFAULT;
   }
-  err = apConfigError(pwd.c_str(), name.c_str(), channel);
-  if(err)
+  if(plan.openFallback)
   {
-    // Not falling back to an open AP: that would expose the DSP unnoticed
+    // Open so the web UI stays reachable; pwdap stays as stored until replaced
     Serial.print(F("[ERROR] AP settings: "));
-    Serial.println(err);
-    Serial.println(F("AP NOT started. Fix pwdap in the settings file."));
-    return;
+    Serial.println(plan.pwdError);
+    Serial.println(F("[WARNING] AP runs OPEN until a valid AP password is stored"));
   }
+  apPasswordError = plan.pwdError;
+  apOpenFallback = plan.openFallback;
+  needUpdateUI = true;
 
   bool ok;
-  if( pwd.length() > 0 )
+  if(plan.pwd)
   {
     Serial.print(F("AP password protected "));
-    Serial.println(name);
-    ok = WiFi.softAP(name.c_str(), pwd.c_str(), channel);
+    Serial.println(plan.name);
   }
   else
   {
     Serial.print(F("AP open: "));
-    Serial.println(name);
-    ok = WiFi.softAP(name.c_str(), NULL, channel);
+    Serial.println(plan.name);
   }
+  ok = WiFi.softAP(plan.name, plan.pwd, plan.channel);
   Serial.print(F("softAP "));
   Serial.print(ok ? F("started, channel ") : F("FAILED, channel "));
-  Serial.println(channel);
+  Serial.println(plan.channel);
   delay(100);
 
   if(!WiFi.softAPConfig(ip, ip, subnet))
@@ -696,6 +714,11 @@ void loop()
   TIMERG0.wdt_feed=1;
   TIMERG0.wdt_wprotect=0;
 
+  // Worker jobs and web handlers set needUpdateUI. Taken before the input below,
+  // so a "switching preset" requested in this pass is not overdrawn by the old UI.
+  if( needUpdateUI.exchange( false ) )
+    pendingRedraw.request( PendingRedraw::UI );
+
   matrixLoop();
 
 
@@ -734,7 +757,7 @@ void loop()
     }
     else if( editMode == 1 )
     {
-      myDisplay.drawSwitchingPreset();
+      pendingRedraw.request( PendingRedraw::SWITCHING_PRESET );
 
       queue_next_preset();
 
@@ -764,7 +787,7 @@ void loop()
     }
     else if( editMode == 1 )
     {
-      myDisplay.drawSwitchingPreset();
+      pendingRedraw.request( PendingRedraw::SWITCHING_PRESET );
 
       queue_prev_preset();
 
@@ -813,7 +836,7 @@ void loop()
       }
       else if((irval == APPLE_A_REMOTE_MENU) || (irval == APPLE_B_REMOTE_MENU))
       {
-        myDisplay.drawSwitchingPreset();
+        pendingRedraw.request( PendingRedraw::SWITCHING_PRESET );
         queue_next_preset();
       }
     }
@@ -821,12 +844,12 @@ void loop()
     {
       if((irval == APPLE_A_REMOTE_LEFT) || (irval == APPLE_B_REMOTE_LEFT))
       {
-        myDisplay.drawSwitchingPreset();
+        pendingRedraw.request( PendingRedraw::SWITCHING_PRESET );
         queue_prev_preset();
       }
       else if((irval == APPLE_A_REMOTE_RIGHT) || (irval == APPLE_B_REMOTE_RIGHT))
       {
-        myDisplay.drawSwitchingPreset();
+        pendingRedraw.request( PendingRedraw::SWITCHING_PRESET );
         queue_next_preset();
       }
     }
@@ -836,10 +859,8 @@ void loop()
   }
   #endif
 
-  if( needUpdateUI )
-  {
-    updateUI();
-    needUpdateUI = false;
-  }
+  // Drawn only once the bus is free, so the input above keeps being read
+  // while the worker runs a preset load or FIR upload.
+  pendingRedraw.serve( tryDrawScreen );
 
 }

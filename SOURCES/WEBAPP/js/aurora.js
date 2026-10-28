@@ -264,8 +264,22 @@ function getWifiConfig(){
   .then(function(data) {
     document.getElementById('ssid').value = data.ssid;
     document.getElementById('apname').value = data.apname;
-    document.getElementById('apchannel').value = data.apchannel;})
+    document.getElementById('apchannel').value = data.apchannel;
+    var warn = document.getElementById('apwarn');
+    if(warn){
+      warn.textContent = apWarningText(data);
+      warn.style.display = warn.textContent ? "block" : "none";
+    }})
   .catch(function(error) {console.log(error);});
+}
+
+// Warning while the AP runs open because the stored AP password is invalid
+function apWarningText(data){
+  if(!data.apopenfallback)
+    return "";
+  return "Warning: the access point is running OPEN because the stored AP password is invalid" +
+    (data.appwderror ? " (" + data.appwderror + ")" : "") +
+    ". Anyone nearby can reach this DSP. Store a valid AP password and restart.";
 }
 
 function hideAddon(){

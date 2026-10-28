@@ -52,6 +52,13 @@ static std::string patch(MatrixModel& m, const char* json, uint32_t now = 0)
 {
   DynamicJsonDocument doc(512);
   assert(!deserializeJson(doc, json));
+  return m.apply(doc.as<JsonObject>(), now).reason;
+}
+
+static MatrixEditResult edit(MatrixModel& m, const char* json, uint32_t now = 0)
+{
+  DynamicJsonDocument doc(512);
+  assert(!deserializeJson(doc, json));
   return m.apply(doc.as<JsonObject>(), now);
 }
 
@@ -616,17 +623,13 @@ static void slotsArepackedInOrder()
   assert(coeffsOf(m, "out", 1)["bq"].size() == 3);
 }
 
-static void multiBiquadEditsAreRampedAndSingleBiquadEditsStayLive()
+static void multiBiquadEditsAreRamped()
 {
   FakePort port;
   MatrixModel m(port, 2, 8, 5);
   assert(patch(m, "{\"ch\":\"bus\",\"idx\":0,\"gain\":-6}").empty());
   assert(addSlot(m, "\"type\":\"peq\",\"freq\":200", "bus", 0).empty());
   assert(addSlot(m, "\"type\":\"lp\",\"design\":\"lr\",\"order\":4,\"freq\":2000", "bus", 0).empty());
-
-  port.events.clear();
-  assert(setSlot(m, 0, "\"freq\":300", "bus", 0).empty());
-  assert(port.events.size() == 1 && port.events[0].type == 'b' && port.events[0].val == 0);
 
   port.events.clear();
   assert(setSlot(m, 1, "\"order\":8", "bus", 0).empty());
@@ -660,27 +663,107 @@ static void multiBiquadEditsAreRampedAndSingleBiquadEditsStayLive()
   assert(port.events.back().type == 'g' && near(port.events.back().val, std::pow(10.0, -6.0 / 20)));
 }
 
-// Spec 36/37: dragging a slider of a multi-biquad Slot applies live without muting.
-// Only a stage layout shift (add, delete, type/design/order change) ramps the Channel.
-static void parameterEditsOfAMultiBiquadSlotStayLive()
+// Expects one ramp of the Channel: down, one wait, the given biquad stages, back up to `up`.
+static void assertRampedStages(const FakePort& port, int idx, int first, int count, double up)
+{
+  assert(port.events.size() == (size_t)(count + 3));
+  assert(port.events[0].type == 'g' && port.events[0].idx == idx && near(port.events[0].val, 0.0));
+  assert(port.events[1].type == 'w' && port.events[1].val >= MATRIX_RAMP_MS);
+  for (int k = 0; k < count; k++)
+    assert(port.events[k + 2].type == 'b' && port.events[k + 2].idx == idx && port.events[k + 2].val == first + k);
+  assert(port.events.back().type == 'g' && port.events.back().idx == idx && near(port.events.back().val, up));
+}
+
+// Spec 37: every filter Commit that changes a value, and every Slot bypass, ramps the
+// Channel down and up around the biquad writes, single-biquad Slots included.
+static void parameterEditsAndBypassAreRamped()
 {
   FakePort port;
   MatrixModel m(port, 2, 8, 6);
+  const double up = std::pow(10.0, -6.0 / 20);
   assert(patch(m, "{\"ch\":\"bus\",\"idx\":0,\"gain\":-6}").empty());
+  assert(addSlot(m, "\"type\":\"peq\",\"freq\":200", "bus", 0).empty());
   assert(addSlot(m, "\"type\":\"lp\",\"design\":\"lr\",\"order\":8,\"freq\":2000", "bus", 0).empty());
 
-  port.events.clear();
-  assert(setSlot(m, 0, "\"freq\":2500", "bus", 0).empty());
-  assert(port.events.size() == 4);
-  for (int stage = 0; stage < 4; stage++)
-    assert(port.events[stage].type == 'b' && port.events[stage].val == stage);
+  const char* peqEdits[] = { "\"freq\":300", "\"q\":2", "\"gain\":4" };
+  for (size_t e = 0; e < sizeof(peqEdits) / sizeof(peqEdits[0]); e++)
+  {
+    port.events.clear();
+    assert(setSlot(m, 0, peqEdits[e], "bus", 0).empty());
+    assertRampedStages(port, 0, 0, 1, up);
+  }
 
-  // bypass keeps the Slot's stages allocated, so no other Slot moves: no ramp either
   port.events.clear();
-  assert(setSlot(m, 0, "\"bypass\":true", "bus", 0).empty());
-  assert(port.events.size() == 4);
-  for (size_t k = 0; k < port.events.size(); k++)
-    assert(port.events[k].type == 'b');
+  assert(setSlot(m, 1, "\"freq\":2500", "bus", 0).empty());
+  assertRampedStages(port, 0, 1, 4, up);
+
+  port.events.clear();
+  assert(setSlot(m, 1, "\"bypass\":true", "bus", 0).empty());
+  assertRampedStages(port, 0, 1, 4, up);
+
+  port.events.clear();
+  assert(setSlot(m, 1, "\"bypass\":false", "bus", 0).empty());
+  assertRampedStages(port, 0, 1, 4, up);
+
+  // a rejected edit emits nothing
+  port.events.clear();
+  assert(!setSlot(m, 0, "\"freq\":5", "bus", 0).empty());
+  assert(port.events.empty());
+}
+
+// Spec 36: a Commit that leaves every value as it was writes and ramps nothing.
+static void unchangedCommitEmitsNothing()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 6);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"mute\":false}").empty());
+  assert(addSlot(m, "\"type\":\"peq\",\"freq\":200,\"q\":1,\"gain\":3").empty());
+  assert(addSlot(m, "\"type\":\"hp\",\"design\":\"lr\",\"order\":4,\"freq\":80").empty());
+  port.events.clear(); port.w.clear();
+  assert(setSlot(m, 0, "\"freq\":200,\"q\":1,\"gain\":3,\"bypass\":false").empty());
+  assert(setSlot(m, 1, "\"type\":\"hp\",\"design\":\"lr\",\"order\":4,\"freq\":80").empty());
+  assert(port.events.empty() && port.w.empty());
+
+  // a parameter edit of a bypassed Slot changes no biquad, so nothing is written either
+  assert(setSlot(m, 0, "\"bypass\":true").empty());
+  port.events.clear(); port.w.clear();
+  assert(setSlot(m, 0, "\"freq\":400").empty());
+  assert(port.events.empty() && port.w.empty());
+}
+
+// Muted Channels are silent already: their filter edits are written without a ramp.
+static void mutedChannelFilterEditsSkipTheRamp()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  assert(addSlot(m, "\"type\":\"peq\",\"freq\":200").empty());  // Outputs start muted
+  port.events.clear();
+  assert(setSlot(m, 0, "\"freq\":300").empty());
+  assert(port.events.size() == 1 && port.events[0].type == 'b');
+  port.events.clear();
+  assert(setSlot(m, 0, "\"bypass\":true").empty());
+  assert(port.events.size() == 1 && port.events[0].type == 'b');
+}
+
+// Linked members ramp together on a parameter edit: all down, one wait, all writes, all up.
+static void linkedParameterEditRampsMembersTogether()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  for (int o = 2; o < 4; o++)
+    assert(patch(m, ("{\"ch\":\"out\",\"idx\":" + std::to_string(o) + ",\"mute\":false,\"link\":\"B\"}").c_str()).empty());
+  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"B\",\"filters\":true}").empty());
+  assert(addSlot(m, "\"type\":\"peq\",\"freq\":200", "out", 2).empty());
+  port.events.clear();
+  assert(setSlot(m, 0, "\"gain\":-3", "out", 3).empty());
+  assert(port.events.size() == 2 + 1 + 2 + 2);
+  assert(port.events[0].type == 'g' && port.events[0].val == 0.0 && port.events[0].idx == 2);
+  assert(port.events[1].type == 'g' && port.events[1].val == 0.0 && port.events[1].idx == 3);
+  assert(port.events[2].type == 'w');
+  assert(port.events[3].type == 'b' && port.events[3].idx == 2);
+  assert(port.events[4].type == 'b' && port.events[4].idx == 3);
+  assert(port.events[5].type == 'g' && near(port.events[5].val, 1.0) && port.events[5].idx == 2);
+  assert(port.events[6].type == 'g' && near(port.events[6].val, 1.0) && port.events[6].idx == 3);
 }
 
 static std::vector<Write> only(const FakePort& port, char type);
@@ -1453,8 +1536,53 @@ static void linkGroupsRoundTripAndUndoTogether()
   assert(b.savePreset() == before);
 }
 
+static void editResultsDistinguishSuccessBadRequestAndConflict()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  m.setPreset(2);
+
+  MatrixEditResult r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":-3}");
+  assert(r.status == MATRIX_EDIT_OK && r.reason.empty());
+  r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":-3,\"preset\":2}");
+  assert(r.status == MATRIX_EDIT_OK);
+
+  r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":99}");
+  assert(r.status == MATRIX_EDIT_BAD_REQUEST && !r.reason.empty());
+
+  // An edit made against another preset is a conflict, whatever else it carries.
+  port.w.clear();
+  r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":-6,\"preset\":1}");
+  assert(r.status == MATRIX_EDIT_CONFLICT && r.reason == "preset changed; refresh the matrix");
+  r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":99,\"preset\":\"2\"}");
+  assert(r.status == MATRIX_EDIT_CONFLICT && r.reason == "preset changed; refresh the matrix");
+  assert(port.w.empty());
+
+  // During a preset switch every edit is a conflict, and a second switch cannot start.
+  assert(m.beginPresetSwitch());
+  assert(!m.beginPresetSwitch());
+  r = edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":99}");
+  assert(r.status == MATRIX_EDIT_CONFLICT && r.reason == "preset switch in progress");
+  assert(port.w.empty());
+  m.endPresetSwitch();
+  assert(edit(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":-6}").status == MATRIX_EDIT_OK);
+  assert(m.beginPresetSwitch());
+}
+
+static void stateCarriesTheActivePreset()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  assert(stateOf(m)["preset"] == 0);
+  m.setPreset(3);
+  assert(stateOf(m)["preset"] == 3);
+  assert(stateOf(m)["nout"] == 8);
+}
+
 int main()
 {
+  editResultsDistinguishSuccessBadRequestAndConflict();
+  stateCarriesTheActivePreset();
   linkMembershipHasSeparateBusAndOutputScopes();
   linkedAspectsPropagateAndJoiningCopiesAbsoluteValues();
   joiningRejectsLinkedSettingsInTheSamePatch();
@@ -1480,8 +1608,11 @@ int main()
   undoRestoresSlots();
   slotCostPerTypeAndOrder();
   slotsArepackedInOrder();
-  multiBiquadEditsAreRampedAndSingleBiquadEditsStayLive();
-  parameterEditsOfAMultiBiquadSlotStayLive();
+  multiBiquadEditsAreRamped();
+  parameterEditsAndBypassAreRamped();
+  unchangedCommitEmitsNothing();
+  mutedChannelFilterEditsSkipTheRamp();
+  linkedParameterEditRampsMembersTogether();
   routeSwitchAndLayoutChangeRampOnce();
   linkedLayoutChangeRampsMembersTogether();
   bypassOfAMultiBiquadSlotKeepsItsStages();

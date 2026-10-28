@@ -255,21 +255,6 @@ void MatrixModel::stages( const Channel& c, std::vector<Coef>& out ) const
   }
 }
 
-/*! True if a Slot was added or deleted or changed type, design or order: then Slots may sit on
- *  other biquads than before. Parameter and bypass edits keep every Slot on its biquads. */
-bool MatrixModel::layoutChanged( const Channel& before, const Channel& after )
-{
-  if( after.slots.size() != before.slots.size() )
-    return true;
-  for( size_t i = 0; i < after.slots.size(); i++ )
-  {
-    const Slot& a = after.slots[i]; const Slot& b = before.slots[i];
-    if( a.type != b.type || a.lr != b.lr || a.order != b.order )
-      return true;
-  }
-  return false;
-}
-
 /*! Writes the biquads that differ from prev (all of them if prev is NULL). */
 void MatrixModel::writeStages( MatrixChannelKind kind, int idx, const Channel& c, const Channel* prev )
 {
@@ -282,20 +267,17 @@ void MatrixModel::writeStages( MatrixChannelKind kind, int idx, const Channel& c
       port_.writeBiquad( kind, idx, s, now[s].a, now[s].b );
 }
 
-/*! True if the edit lets the Channel briefly run a mix of old and new Slots: the layout
- *  changed and more than one biquad is rewritten. Parameter edits are safeloaded live. */
+/*! True if the edit rewrites any biquad: a new coefficient on running filter state can click,
+ *  and a multi-biquad rewrite would briefly run a mix of old and new Slots (spec 37). */
 bool MatrixModel::needsRamp( const Channel& before, const Channel& after ) const
 {
-  if( !layoutChanged( before, after ) )
-    return false;
   std::vector<Coef> was, now;
   stages( before, was );
   stages( after, now );
-  int changed = 0;
   for( int s = 0; s < nbiquad_; s++ )
     if( memcmp( &was[s], &now[s], sizeof( Coef ) ) != 0 )
-      changed++;
-  return changed > 1;
+      return true;
+  return false;
 }
 
 /*! Slot edit of a patch; changes only c, and only if it returns "". */
@@ -388,7 +370,7 @@ MatrixModel::MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad, int
   : port_( port ), nbus_( nbus < MATRIX_MAX_BUS ? nbus : MATRIX_MAX_BUS ),
     nout_( nout < MATRIX_MAX_OUT ? nout : MATRIX_MAX_OUT ), nbiquad_( nbiquad > 0 ? nbiquad : 0 ),
     maxDelay_( maxDelay > 0 && maxDelay < MATRIX_MAX_DELAY_SAMPLES ? maxDelay : MATRIX_MAX_DELAY_SAMPLES ),
-    spdif_( 0 ), dirty_( false ), lastChange_( 0 ), presetSwitching_( false )
+    spdif_( 0 ), dirty_( false ), lastChange_( 0 ), presetSwitching_( false ), preset_( 0 )
 {
   undo_.valid = false;
   reset();
@@ -457,8 +439,8 @@ double MatrixModel::linear( const Channel& c ) const
   return c.mute ? 0.0 : c.gainBypass ? 1.0 : pow( 10.0, c.gain / 20.0 );
 }
 
-/*! Writes what differs from the snapshot. Channels that switch their route or Source, or change
- *  their Slot layout, ramp together: all down, one wait, every write, all up. */
+/*! Writes what differs from the snapshot. Channels that switch their route or Source, or rewrite
+ *  any biquad, ramp together: all down, one wait, every write, all up. */
 void MatrixModel::writeChanges( const Snapshot& before )
 {
   bool ramp[MATRIX_MAX_BUS + MATRIX_MAX_OUT];
@@ -518,11 +500,30 @@ void MatrixModel::snapshot( Snapshot& s ) const
   for( int o = 0; o < nout_; o++ ) s.out[o] = out_[o];
 }
 //==============================================================================
-std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
+bool MatrixModel::beginPresetSwitch( void )
 {
   if( presetSwitching_ )
-    return "preset switch in progress";
+    return false;
+  presetSwitching_ = true;
+  return true;
+}
 
+MatrixEditResult MatrixModel::apply( JsonObject patch, uint32_t nowMs )
+{
+  if( patch.containsKey( "preset" ) )
+  {
+    if( !patch["preset"].is<int>() || patch["preset"].as<int>() != preset_ )
+      return { MATRIX_EDIT_CONFLICT, "preset changed; refresh the matrix" };
+    patch.remove( "preset" );
+  }
+  if( presetSwitching_ )
+    return { MATRIX_EDIT_CONFLICT, "preset switch in progress" };
+  std::string reason = applyPatch( patch, nowMs );
+  return { reason.empty() ? MATRIX_EDIT_OK : MATRIX_EDIT_BAD_REQUEST, reason };
+}
+
+std::string MatrixModel::applyPatch( JsonObject patch, uint32_t nowMs )
+{
   const char* kind = patch["ch"].as<const char*>();
   if( !kind )
     return "missing ch";
@@ -892,6 +893,7 @@ static std::string toString( const JsonDocument& doc )
 std::string MatrixModel::stateJson( void ) const
 {
   DynamicJsonDocument doc( 20480 + 288 * slotCount() );
+  doc["preset"] = preset_;
   doc["nbus"] = nbus_;
   doc["nout"] = nout_;
   doc["nbiquad"] = nbiquad_;
