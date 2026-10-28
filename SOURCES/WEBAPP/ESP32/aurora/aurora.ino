@@ -270,7 +270,6 @@ static void startAP()
   }
   apPasswordError = plan.pwdError;
   apOpenFallback = plan.openFallback;
-  needUpdateUI = true;
 
   bool ok;
   if(plan.pwd)
@@ -296,6 +295,7 @@ static void startAP()
   dnsServer.stop();
   dnsServer.start(53, "*", ip);
   apUp = true;
+  needUpdateUI = true;  // after apUp: the UI task on the other core redraws from it
 }
 
 //==============================================================================
