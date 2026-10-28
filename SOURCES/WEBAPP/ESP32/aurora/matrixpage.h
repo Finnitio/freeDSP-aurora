@@ -360,6 +360,36 @@ function plot(){
   g.stroke();
 }
 
+// ---- Preset test statistics: exact multinomial test of the Votes against "all Presets equally liked"
+// votes: index of the chosen Preset per Round; k: number of Presets in the test.
+function tally(votes,k){
+  var counts=[],i;
+  for(i=0;i<k;i++)counts[i]=0;
+  votes.forEach(function(v){counts[v]++;});
+  return {n:votes.length,counts:counts,pct:counts.map(function(c){return votes.length?100*c/votes.length:0;})};
+}
+// p = sum of the probabilities of all outcomes no more likely than the observed one (k<=4, N<=50: cheap).
+function exactP(counts){
+  var k=counts.length,n=0,lf=[0],i,p=0,obs,c=[];
+  counts.forEach(function(v){n+=v;});
+  for(i=1;i<=n;i++)lf[i]=lf[i-1]+Math.log(i);
+  var lp=function(c){return lf[n]-c.reduce(function(s,v){return s+lf[v];},0)-n*Math.log(k);};
+  obs=lp(counts);
+  (function walk(j,left){  // every split of the n Votes over the k Presets
+    if(j==k-1){c[j]=left;var l=lp(c);if(l<=obs+1e-9)p+=Math.exp(l);return;}
+    for(var v=0;v<=left;v++){c[j]=v;walk(j+1,left-v);}
+  })(0,n);
+  return Math.min(1,p);
+}
+// winner: index of the single leader, -1 on a tie for first; p: null below 3 Votes; sig: a winner with p < 0.05.
+function verdict(counts){
+  var n=0,top=Math.max.apply(null,counts),lead=counts.filter(function(c){return c==top;}).length,p;
+  counts.forEach(function(v){n+=v;});
+  var w=n&&lead==1?counts.indexOf(top):-1;
+  p=n<3?null:exactP(counts);
+  return {winner:w,p:p,sig:w>=0&&p!==null&&p<0.05};
+}
+
 // ---- WiFi dialog: the same checks, messages and open-AP warning as the settings UI (aurora.js)
 function wifiEl(id){return document.getElementById(id);}
 function wsay(t){wifiEl("wmsg").textContent=t||"";}
