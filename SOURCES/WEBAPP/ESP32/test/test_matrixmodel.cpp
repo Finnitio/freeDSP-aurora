@@ -274,6 +274,45 @@ static void saveIsDueTwoSecondsAfterTheLastChange()
   assert(!m.saveDue(99999));
 }
 
+static void presetSwitchRejectsAnOverlappingEditAndKeepsPresetAssociation()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+
+  // An accepted edit immediately before the switch still belongs to preset A.
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"mute\":false,\"gain\":-3}", 1000).empty());
+  const std::string presetA = m.savePreset();
+
+  FakePort presetPort;
+  MatrixModel presetModel(presetPort, 2, 8);
+  assert(patch(presetModel, "{\"ch\":\"out\",\"idx\":0,\"mute\":false,\"gain\":-12}").empty());
+  const std::string presetB = presetModel.savePreset();
+
+  port.w.clear();
+  m.beginPresetSwitch();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":6}") == "preset switch in progress");
+  assert(port.w.empty());
+
+  // Loading the selected preset emits its complete DSP state. The refused edit
+  // cannot append a stale write behind that state.
+  assert(m.loadPreset(presetB).empty());
+  assert(stateOf(m)["outs"][0]["gain"] == -12);
+  assert(port.w.size() == 4 + 32 + 1);
+  m.endPresetSwitch();
+
+  // Edits resume against preset B and are persisted with B, while the snapshot
+  // saved for A retains the accepted pre-switch edit.
+  port.w.clear();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"gain\":-10}", 4000).empty());
+  assert(port.w.size() == 1 && port.w[0].type == 'g' && near(port.w[0].val, std::pow(10.0, -10.0 / 20)));
+
+  DynamicJsonDocument a(16384), b(16384);
+  assert(!deserializeJson(a, presetA));
+  assert(!deserializeJson(b, m.savePreset()));
+  assert(a["outs"][0]["gain"] == -3);
+  assert(b["outs"][0]["gain"] == -10);
+}
+
 static void undoRestoresTheLastAcceptedPatch()
 {
   FakePort port;
@@ -1159,6 +1198,7 @@ int main()
   badPresetIsRejectedAndKeepsState();
   loadDefaultsResetsAndWritesEverything();
   saveIsDueTwoSecondsAfterTheLastChange();
+  presetSwitchRejectsAnOverlappingEditAndKeepsPresetAssociation();
   printf("all tests passed\n");
   return 0;
 }
