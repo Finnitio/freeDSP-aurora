@@ -230,7 +230,7 @@ static void badPresetIsRejectedAndKeepsState()
   MatrixModel m(port, 2, 8);
   std::string good = m.savePreset();
   assert(!m.loadPreset("not json").empty());
-  assert(!m.loadPreset("{\"v\":3,\"buses\":[],\"outs\":[]}").empty());  // unknown version
+  assert(!m.loadPreset("{\"v\":4,\"buses\":[],\"outs\":[]}").empty());  // unknown version
   assert(!m.loadPreset("{\"v\":1,\"buses\":[],\"outs\":[]}").empty());  // wrong counts
   assert(m.savePreset() == good);
   assert(port.w.empty());
@@ -829,16 +829,16 @@ static void presetVersionIsBumpedAndOldOnesStillLoad()
   MatrixModel a(port, 2, 8, 4);
   addSlot(a, "\"type\":\"peq\"");
   std::string saved = a.savePreset();
-  assert(saved.find("\"v\":2") != std::string::npos);
+  assert(saved.find("\"v\":3") != std::string::npos);
   std::string v1 = saved;
-  v1.replace(v1.find("\"v\":2"), 5, "\"v\":1");
+  v1.replace(v1.find("\"v\":3"), 5, "\"v\":1");
   FakePort port2;
   MatrixModel b(port2, 2, 8, 4);
   assert(b.loadPreset(v1).empty());
   assert(b.savePreset() == saved);
-  std::string v3 = saved;
-  v3.replace(v3.find("\"v\":2"), 5, "\"v\":3");
-  assert(!b.loadPreset(v3).empty());
+  std::string v4 = saved;
+  v4.replace(v4.find("\"v\":3"), 5, "\"v\":4");
+  assert(!b.loadPreset(v4).empty());
 }
 
 static std::vector<Write> only(const FakePort& port, char type)
@@ -1055,8 +1055,122 @@ static void spdifOutSurvivesPresetRoundTrip()
   assert(m2.loadPreset(old).empty() && stateOf(m2)["spdifout"] == 0);
 }
 
+static void linkMembershipHasSeparateBusAndOutputScopes()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  DynamicJsonDocument st = stateOf(m);
+  assert(std::string(st["buses"][0]["link"].as<const char*>()) == "");
+  assert(st["links"]["bus"]["mute"] == false);
+  assert(st["links"]["outs"].size() == 4);
+  assert(std::string(st["links"]["outs"][0]["id"].as<const char*>()) == "A");
+
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"link\":\"A\"}").empty());
+  assert(std::string(stateOf(m)["outs"][0]["link"].as<const char*>()) == "A");
+  assert(patch(m, "{\"ch\":\"bus\",\"idx\":0,\"link\":\"bus\"}").empty());
+  assert(std::string(stateOf(m)["buses"][0]["link"].as<const char*>()) == "bus");
+  assert(!patch(m, "{\"ch\":\"bus\",\"idx\":1,\"link\":\"A\"}").empty());
+  assert(!patch(m, "{\"ch\":\"out\",\"idx\":1,\"link\":\"bus\"}").empty());
+}
+
+static void linkedAspectsPropagateAndJoiningCopiesAbsoluteValues()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"mute\":false,\"gain\":-3,\"delayUs\":1000,\"link\":\"A\"}").empty());
+  assert(addSlot(m, "\"type\":\"hp\",\"design\":\"lr\",\"order\":4,\"freq\":120", "out", 0).empty());
+  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"A\",\"mute\":true,\"filters\":true,\"gain\":true,\"delay\":true}").empty());
+
+  port.w.clear(); port.bq.clear();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"link\":\"A\"}").empty());
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["outs"][1]["mute"] == false && st["outs"][1]["gain"] == -3);
+  assert(st["outs"][1]["delaySamples"] == 48 && st["outs"][1]["slots"].size() == 1);
+  assert(only(port, 'g').size() == 1 && only(port, 'd').size() == 1);
+  assert(port.bq.size() == 2 && port.bq[0].idx == 1);
+
+  port.w.clear(); port.bq.clear();
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"mute\":true,\"gain\":-6,\"delayUs\":2000,\"slot\":{\"op\":\"set\",\"i\":0,\"bypass\":true},\"polarity\":true}").empty());
+  st = stateOf(m);
+  for( int i = 0; i < 2; i++ )
+  {
+    assert(st["outs"][i]["mute"] == true && st["outs"][i]["gain"] == -6);
+    assert(st["outs"][i]["delaySamples"] == 96 && st["outs"][i]["slots"][0]["bypass"] == true);
+  }
+  assert(st["outs"][0]["polarity"] == false && st["outs"][1]["polarity"] == true);
+  assert(only(port, 'g').size() == 2 && only(port, 'd').size() == 2);
+  assert(port.bq.size() == 4);  // two stages, for both Outputs
+
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"link\":\"\"}").empty());
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"mute\":false}").empty());
+  st = stateOf(m);
+  assert(st["outs"][0]["mute"] == false && st["outs"][1]["mute"] == true); // leaving keeps its value
+}
+
+static void eachLinkAspectCanBeEnabledIndependently()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  patch(m, "{\"ch\":\"out\",\"idx\":2,\"link\":\"B\"}");
+  patch(m, "{\"ch\":\"out\",\"idx\":3,\"link\":\"B\"}");
+  patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"B\",\"gain\":true}");
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":2,\"gain\":4,\"delayUs\":1000,\"mute\":false}").empty());
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["outs"][3]["gain"] == 4);
+  assert(st["outs"][3]["delaySamples"] == 0 && st["outs"][3]["mute"] == true);
+  assert(!patch(m, "{\"ch\":\"link\",\"scope\":\"bus\",\"group\":\"bus\",\"delay\":true}").empty());
+}
+
+static void enablingAnAspectMakesExistingMembersConsistent()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  patch(m, "{\"ch\":\"out\",\"idx\":4,\"mute\":false,\"gain\":2,\"link\":\"D\"}");
+  patch(m, "{\"ch\":\"out\",\"idx\":5,\"mute\":false,\"gain\":-12,\"link\":\"D\"}");
+  port.w.clear();
+  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"D\",\"gain\":true}").empty());
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["outs"][4]["gain"] == 2 && st["outs"][5]["gain"] == 2);
+  assert(only(port, 'g').size() == 1 && only(port, 'g')[0].idx == 5);
+
+  patch(m, "{\"ch\":\"bus\",\"idx\":0,\"link\":\"bus\"}");
+  patch(m, "{\"ch\":\"bus\",\"idx\":1,\"link\":\"bus\"}");
+  patch(m, "{\"ch\":\"link\",\"scope\":\"bus\",\"group\":\"bus\",\"mute\":true}");
+  port.w.clear();
+  assert(patch(m, "{\"ch\":\"bus\",\"idx\":1,\"mute\":true}").empty());
+  assert(only(port, 'g').size() == 2);
+  assert(only(port, 'g')[0].val == 0.0 && only(port, 'g')[1].val == 0.0);
+}
+
+static void linkGroupsRoundTripAndUndoTogether()
+{
+  FakePort port;
+  MatrixModel a(port, 2, 8, 4);
+  patch(a, "{\"ch\":\"out\",\"idx\":0,\"link\":\"C\"}");
+  patch(a, "{\"ch\":\"out\",\"idx\":1,\"link\":\"C\"}");
+  patch(a, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"C\",\"mute\":true,\"filters\":true,\"gain\":true,\"delay\":false}");
+  patch(a, "{\"ch\":\"bus\",\"idx\":0,\"link\":\"bus\"}");
+  patch(a, "{\"ch\":\"link\",\"scope\":\"bus\",\"group\":\"bus\",\"filters\":true}");
+  std::string saved = a.savePreset();
+  FakePort port2;
+  MatrixModel b(port2, 2, 8, 4);
+  assert(b.loadPreset(saved).empty() && b.savePreset() == saved);
+  DynamicJsonDocument st = stateOf(b);
+  assert(st["links"]["outs"][2]["mute"] == true && st["links"]["outs"][2]["delay"] == false);
+  assert(std::string(st["outs"][1]["link"].as<const char*>()) == "C");
+  const std::string before = b.savePreset();
+  patch(b, "{\"ch\":\"out\",\"idx\":0,\"mute\":false}");
+  b.undo();
+  assert(b.savePreset() == before);
+}
+
 int main()
 {
+  linkMembershipHasSeparateBusAndOutputScopes();
+  linkedAspectsPropagateAndJoiningCopiesAbsoluteValues();
+  eachLinkAspectCanBeEnabledIndependently();
+  enablingAnAspectMakesExistingMembersConsistent();
+  linkGroupsRoundTripAndUndoTogether();
   delayMicrosecondsRoundToSamples();
   delayBoundaryIs40ms();
   delayLimitFollowsThePlugin();

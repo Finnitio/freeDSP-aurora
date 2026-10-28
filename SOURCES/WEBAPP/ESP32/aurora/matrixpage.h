@@ -27,6 +27,9 @@ button.on{background-color:#802020}
 #plot{width:100%;height:200px;background:#101010;border:1px solid #606060}
 button.wide{width:100%;height:32px;border-top-width:1px}
 button:disabled{opacity:.4}
+.linkset{border-left:3px solid #606060;padding-left:6px;margin:4px 0 8px}
+.linkset b{flex:0 0 54px}
+.linkset button{width:auto;min-width:58px;height:28px;border-top-width:1px}
 </style>
 </head>
 <body onload="load()">
@@ -36,8 +39,10 @@ button:disabled{opacity:.4}
 <div id="presets" class="row"></div>
 <div class="row"><span class="lbl">Vol</span><input type="range" id="vol" class="gain" min="-80" max="0" step="0.5" value="-60" oninput="sendVol(this.value)"><span class="gv" id="volv"></span></div>
 <h2>Buses</h2>
+<div id="buslinks"></div>
 <div id="buses"></div>
 <h2>Outputs</h2>
+<div id="outlinks"></div>
 <div id="outs"></div>
 <h2>SPDIF out</h2>
 <div class="row"><select id="spdif" onchange="send('spdif',0,{sel:parseInt(this.value)})"></select></div>
@@ -106,13 +111,29 @@ function esc(s){return s.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/<
 function opts(list,sel,val,txt){
   return list.map(function(o,i){var v=val(o,i);return "<option value='"+v+"'"+(v==sel?" selected":"")+">"+txt(o)+"</option>";}).join("");
 }
+function linkOpts(ch,sel){
+  var ids=ch=="bus"?["","bus"]:["","A","B","C","D"];
+  return ids.map(function(id){var name=id||(ch=="bus"?"No link":"No link");if(id=="bus")name="Bus link";
+    return "<option value='"+id+"'"+(id==sel?" selected":"")+">"+name+"</option>";}).join("");
+}
 function row(ch,idx,c,sel){
   return "<div class='row'><input type='text' class='name' maxlength='16' value=\""+esc(c.name)+"\" onchange=\"send('"+ch+"',"+idx+",{name:this.value})\">"
    +sel
+   +"<select title='Link group' onchange=\"send('"+ch+"',"+idx+",{link:this.value})\">"+linkOpts(ch,c.link)+"</select>"
    +"<button class='mute"+(c.mute?" on":"")+"' onclick=\"send('"+ch+"',"+idx+",{mute:"+!c.mute+"})\">"+(c.mute?"Muted":"Mute")+"</button>"
    +"<button class='mute' onclick=\"openF('"+ch+"',"+idx+")\">Filter</button>"
    +"<input type='range' class='gain' min='"+st.gainmin+"' max='"+st.gainmax+"' step='0.5' value='"+c.gain+"' oninput=\"sendGain('"+ch+"',"+idx+",this.value)\" onchange=\"send('"+ch+"',"+idx+",{gain:parseFloat(this.value)})\">"
    +"<span class='gv' id='gv"+ch+idx+"'>"+c.gain+" dB</span></div>";
+}
+function sendLink(scope,id,key,value){var f={};f[key]=value;var p={ch:"link",scope:scope,group:id};for(var k in f)p[k]=f[k];
+  var n=++seq;return fetch("/matrix",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)})
+   .then(function(r){return r.text().then(function(t){if(r.ok){if(n<seen)return;seen=n;st=JSON.parse(t);say("");}else say(t);draw();});});}
+function linkPanel(scope,l){
+  var keys=["mute","filters","gain","delay"],names=["Mute","Filters","Gain","Delay"];
+  return "<div class='row linkset'><b>"+(scope=="bus"?"Bus link":l.id)+"</b>"+keys.map(function(k,i){
+    var disabled=scope=="bus"&&k=="delay";
+    return "<button"+(disabled?" disabled":"")+" class='"+(l[k]?"on":"")+"' onclick=\"sendLink('"+scope+"','"+l.id+"','"+k+"',"+!l[k]+")\">"+names[i]+"</button>";
+  }).join("")+"</div>";
 }
 function busy(sel){
   var a=document.activeElement;
@@ -131,6 +152,8 @@ function draw(){
   // do not rebuild under an open select, a name being typed or a slider being dragged
   if(busy("#buses,#outs")){late=true;return;}
   late=false;
+  document.getElementById("buslinks").innerHTML=linkPanel("bus",st.links.bus);
+  document.getElementById("outlinks").innerHTML=st.links.outs.map(function(l){return linkPanel("out",l);}).join("");
   document.getElementById("spdif").innerHTML=opts(st.spdifopts,st.spdifout,function(s){return s.v;},function(s){return s.n;});
   document.getElementById("buses").innerHTML=b;
   document.getElementById("outs").innerHTML=o;
