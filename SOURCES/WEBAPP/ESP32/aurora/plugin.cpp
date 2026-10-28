@@ -366,7 +366,8 @@ void initUserParams( void )
     paramCrossover[ii].hp_bypass = false;
   }
 
-  masterVolume.val = -60.0;
+  if( pluginKind != "matrix" )  // a matrix Plugin's volume is global and survives a Preset switch
+    masterVolume.val = -60.0;
 
   spdifOutput.selectionLeft = 0x00000000;
   spdifOutput.selectionRight = 0x00000000;

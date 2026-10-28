@@ -1223,6 +1223,7 @@ void handlePostMasterVolumeJson( JsonObject root )
   masterVolume.val = root["vol"].as<String>().toFloat();
 
   setMasterVolume();
+  matrixMasterVolumeChanged();
   updateUI();
 }
 

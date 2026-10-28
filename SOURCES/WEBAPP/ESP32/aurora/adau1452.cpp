@@ -687,7 +687,7 @@ void uploadUserParams( void )
       size_t len = fileUserParams.read( (uint8_t*)&masterVolumeTemp, sizeof(tMasterVolume) );
       if( len != sizeof(tMasterVolume) )
         Serial.println( "[ERROR] Reading masterVolume from " + presetUsrparamFile[currentPreset] );
-      else
+      else if( pluginKind != "matrix" )  // a matrix Plugin's volume is global, not part of a Preset
         masterVolume.val = masterVolumeTemp.val;
       totalSize += len;
 

@@ -11,8 +11,14 @@
 
 bool isMatrixPlugin( void );
 
-/*! Creates the model from the plugin meta data. Call after readPluginMeta(). */
+/*! Creates the model from the plugin meta data and restores the stored master
+ *  volume (the safe default if there is none). Call after readPluginMeta() and
+ *  before uploadUserParams(), which writes the volume to the DSP. */
 void matrixInit( void );
+
+/*! Call after every master volume change (encoder or web); matrixLoop() stores
+ *  it once it has settled. The volume is global: a Preset switch keeps it. */
+void matrixMasterVolumeChanged( void );
 
 /*! Writes the Baseline to the DSP in full, so the model matches the freshly
  *  loaded DSP program. Call once right after the DSP program upload, while the
@@ -41,7 +47,8 @@ std::string matrixState( void );
 /*! Active biquad coefficients of one Channel (ch "bus" or "out") for the plot; "" if unknown. */
 std::string matrixCoeffs( const char* ch, int idx );
 
-/*! Call from loop(): queues the auto-save once the changes have settled. */
+/*! Call from loop(): queues the auto-save of the Preset and the store of the
+ *  master volume once the changes have settled. */
 void matrixLoop( void );
 
 #endif

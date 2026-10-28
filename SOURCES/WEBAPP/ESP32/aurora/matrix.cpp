@@ -4,6 +4,7 @@
 
 #include "matrix.h"
 #include "matrixmodel.h"
+#include "mastervolume.h"
 #include "adau1452.h"
 #include "i2cworker.h"
 #include "plugin.h"
@@ -48,6 +49,10 @@ RecordPort port;
 MatrixModel* model = NULL;
 SemaphoreHandle_t modelMutex = NULL;  // the model is used by the web task, the worker and loop()
 bool keepStored = false;              // its file failed to load: never overwrite it with defaults
+MasterVolumeSaver* volumeSaver = NULL;  // under modelMutex too: changed on the worker, stored from loop()
+
+static_assert( MASTER_VOLUME_SAVE_DELAY_MS == MATRIX_SAVE_DELAY_MS, "master volume is stored like Autosave" );
+const char* const MASTER_VOLUME_FILE = "/mastervol.txt";
 
 class ModelLock
 {
@@ -123,6 +128,27 @@ void writePresetFile( uint8_t preset, const std::string& json )
   f.write( (const uint8_t*)json.data(), json.size() );
   f.close();
 }
+float readMasterVolumeFile( void )
+{
+  File f = SPIFFS.open( MASTER_VOLUME_FILE, "r" );
+  if( !f )
+    return parseStoredVolume( NULL );
+  String text = f.readString();
+  f.close();
+  return parseStoredVolume( text.c_str() );
+}
+
+void writeMasterVolumeFile( float db )
+{
+  File f = SPIFFS.open( MASTER_VOLUME_FILE, "w" );
+  if( !f )
+  {
+    Serial.println( F("[ERROR] matrix: cannot write master volume file") );
+    return;
+  }
+  f.print( String( db, 2 ) );
+  f.close();
+}
 }  // namespace
 
 bool isMatrixPlugin( void )
@@ -136,6 +162,16 @@ void matrixInit( void )
     return;
   modelMutex = xSemaphoreCreateMutex();
   model = new MatrixModel( port, matrixMeta.nbus, matrixMeta.nout, matrixMeta.nbiquad, matrixMeta.maxdly );
+  masterVolume.val = readMasterVolumeFile();
+  volumeSaver = new MasterVolumeSaver( masterVolume.val );
+}
+
+void matrixMasterVolumeChanged( void )
+{
+  if( !volumeSaver )
+    return;
+  ModelLock lock;
+  volumeSaver->changed( masterVolume.val, millis() );
 }
 
 bool matrixBeginPresetSwitch( void )
@@ -258,6 +294,12 @@ void matrixLoop( void )
   if( !model )
     return;
   ModelLock lock;
+  if( volumeSaver->saveDue( millis() ) )
+  {
+    float db = volumeSaver->value();
+    if( i2cPost( [db]() { writeMasterVolumeFile( db ); } ) )
+      volumeSaver->markSaved( db );
+  }
   if( keepStored || !model->saveDue( millis() ) )
     return;
   std::string json = model->savePreset();
