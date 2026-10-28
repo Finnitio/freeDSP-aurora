@@ -338,6 +338,7 @@ void MatrixModel::reset( void )
     bus_[b].delay = 0;
     bus_[b].delayBypass = false;
     bus_[b].sel = (int)sourceCode( b );  // Analog 1, Analog 2
+    bus_[b].slots.clear();
   }
   for( int o = 0; o < nout_; o++ )
   {
@@ -351,6 +352,7 @@ void MatrixModel::reset( void )
     out_[o].delay = 0;
     out_[o].delayBypass = false;
     out_[o].sel = o % 2;
+    out_[o].slots.clear();
   }
 }
 
