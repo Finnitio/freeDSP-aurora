@@ -32,6 +32,8 @@ const context = {
 vm.createContext(context);
 vm.runInContext(script[1], context);
 
+const realCoeffs = context.coeffs;
+
 async function main() {
   context.activePreset = 2;
   context.draw = () => {};
@@ -91,6 +93,28 @@ async function main() {
   context.drawF();
   assert.strictEqual(scheduled.length, 1,
     "toggling gain bypass schedules a fresh plot response without a Slot edit");
+
+  // A coeffs reply still in flight when the user opens another Channel belongs to
+  // the old Channel; plotting it would combine its biquads with the new Channel's gain.
+  context.coeffs = realCoeffs;
+  context.plot = () => {};
+  context.document.getElementById = () => ({ innerHTML: "", textContent: "", style: {} });
+  context.st.buses[0].name = "Bus 1";
+  Object.assign(context.st.outs[0], { name: "Out 1", delayUs: 0, delaySamples: 0, delayMm: 0 });
+  let reply;
+  context.fetch = (url) => {
+    request = { url };
+    return Promise.resolve({ json: () => new Promise((res) => { reply = res; }) });
+  };
+  context.openF("bus", 0);
+  context.coeffs();
+  assert.strictEqual(request.url, "/matrix/coeffs?ch=bus&idx=0");
+  await new Promise((res) => setImmediate(res));
+  context.openF("out", 0);
+  reply({ fs: 48000, bq: [[2, 0, 0, 0, 0]] });
+  await new Promise((res) => setImmediate(res));
+  assert.strictEqual(context.cf, null,
+    "a coeffs reply for the previously opened Channel is not plotted for the new one");
   console.log("matrix page tests passed");
 }
 

@@ -176,7 +176,7 @@ document.addEventListener("focusout",function(){if(late&&!down)setTimeout(draw,0
 
 // ---- filter page
 function chan(){return (view.ch=="bus"?st.buses:st.outs)[view.idx];}
-function openF(ch,i){view={ch:ch,idx:i};cf=null;csig="";late=false;
+function openF(ch,i){view={ch:ch,idx:i};cf=null;cseq++;csig="";late=false;  // drop replies for the previous Channel
   document.getElementById("main").style.display="none";document.getElementById("flt").style.display="";
   drawF();}
 function closeF(){view=null;late=false;
