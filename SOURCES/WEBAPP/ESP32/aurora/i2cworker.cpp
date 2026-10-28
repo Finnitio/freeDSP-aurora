@@ -29,12 +29,12 @@ static void i2cWorkerTask( void* pvParameters )
 
       // Logged whenever a job used more stack than every job before it, so the
       // last line after a Preset load or FIR upload is the worst case so far.
-      const UBaseType_t free = uxTaskGetStackHighWaterMark( NULL );  // bytes on ESP32
-      if( free < lowestFree )
+      const UBaseType_t unusedStack = uxTaskGetStackHighWaterMark( NULL );  // bytes on ESP32
+      if( unusedStack < lowestFree )
       {
-        lowestFree = free;
+        lowestFree = unusedStack;
         Serial.printf( "[I2C] worker stack high-water: %u of %u bytes never used\n",
-                       (unsigned)free, (unsigned)I2C_WORKER_STACK );
+                       (unsigned)unusedStack, (unsigned)I2C_WORKER_STACK );
       }
     }
   }
