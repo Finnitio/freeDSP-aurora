@@ -270,7 +270,6 @@ static void startAP()
   }
   apPasswordError = plan.pwdError;
   apOpenFallback = plan.openFallback;
-  needUpdateUI = true;
 
   bool ok;
   if(plan.pwd)
@@ -296,6 +295,7 @@ static void startAP()
   dnsServer.stop();
   dnsServer.start(53, "*", ip);
   apUp = true;
+  needUpdateUI = true;  // after apUp: the UI task on the other core redraws from it
 }
 
 //==============================================================================
@@ -349,7 +349,7 @@ void myWiFiTask(void *pvParameters)
   WiFi.persistent(false);
   WiFi.setAutoReconnect(false);
   // WiFi is never switched off. The AP is only dropped while connected if the
-  // user enabled "AP off while connected" (ApSwitch below, docs/adr 0005).
+  // user enabled "AP off while connected" (ApSwitch below).
   WiFi.mode(ssid.length() > 0 ? WIFI_AP_STA : WIFI_AP);
   WiFi.setHostname(AP_HOSTNAME);
   startAP();

@@ -905,8 +905,8 @@ void handleGetWifiConfigJson( AsyncWebServerRequest* request )
     jsonResponse["ip"] = WiFi.localIP().toString();
   // AP runs open because the stored password is invalid (until restart with a valid one)
   jsonResponse["apopenfallback"] = (bool)apOpenFallback;
-  // "AP off while connected" (docs/adr 0005) and whether the AP is running now
-  jsonResponse["apoff"] = Settings.apOffWhileConnected;
+  // "AP off while connected" and whether the AP is running now
+  jsonResponse["apoff"] = (bool)Settings.apOffWhileConnected;
   jsonResponse["apup"] = (bool)apUp;
   if( apOpenFallback && apPasswordError )
     jsonResponse["appwderror"] = apPasswordError;

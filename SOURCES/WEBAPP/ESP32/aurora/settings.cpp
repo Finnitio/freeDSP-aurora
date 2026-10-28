@@ -28,7 +28,7 @@ void writeSettings( void )
     jsonSettings["apchannel"] = Settings.apchannel;
     jsonSettings["adcsum"] = Settings.adcsum;
     jsonSettings["wifion"] = Settings.wifiOn;
-    jsonSettings["apoff"] = Settings.apOffWhileConnected;
+    jsonSettings["apoff"] = (bool)Settings.apOffWhileConnected;
 
     if( serializeJson( jsonSettings, fileSettings ) == 0 )
       Serial.println( "[ERROR] writeSettings(): Failed to write settings to file" );

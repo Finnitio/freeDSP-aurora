@@ -76,6 +76,28 @@ async function showsOpenApWarningLikeSettings() {
     "same warning text as the settings UI");
 }
 
+// While the AP is off ("AP off while connected") it is not running open: only a note that it comes back open.
+async function openApWarningOnlyWhileTheApIsUp() {
+  const down = Object.assign({}, fallback, { connected: true, ip: "10.0.0.7", apoff: true, apup: false });
+  const p = run(page, { "/wificonfig": { status: 200, body: JSON.stringify(down) } });
+  p.context.openWifi();
+  await settle();
+  const s = run(settings, { "/wificonfig": { status: 200, body: JSON.stringify(down) } });
+  s.context.getWifiConfig();
+  await settle();
+  assert(!/running OPEN/.test(p.elements.apwarn.textContent), p.elements.apwarn.textContent);
+  assert.strictEqual(p.elements.apwarn.textContent,
+    "Note: the access point is off now. When it comes back it runs OPEN because the stored AP password is invalid"
+    + " (AP password needs at least 8 characters). Store a valid AP password and restart.");
+  assert.strictEqual(p.elements.apwarn.textContent, s.elements.apwarn.textContent, "same note as the settings UI");
+
+  const up = Object.assign({}, down, { apup: true });
+  const q = run(page, { "/wificonfig": { status: 200, body: JSON.stringify(up) } });
+  q.context.openWifi();
+  await settle();
+  assert(/running OPEN/.test(q.elements.apwarn.textContent), "the AP is up: the warning is shown");
+}
+
 // Each invalid entry: the settings UI's alert text is the expected message on the matrix page.
 async function rejectsInvalidInputWithSettingsMessages() {
   const cases = [
@@ -168,6 +190,12 @@ async function rejectsInvalidWifiWithSettingsMessages() {
     assert.strictEqual(p.elements.smsg.textContent, c.msg, JSON.stringify(c));
     assert.strictEqual(p.requests.length, 0, "nothing is sent for " + JSON.stringify(c));
   }
+
+  // The firmware refuses the same entries with the same texts (staConfigError in apconfig.h).
+  const body = fs.readFileSync("SOURCES/WEBAPP/ESP32/aurora/apconfig.h", "utf8")
+    .match(/staConfigError\([^)]*\)\s*\{([\s\S]*?)\n\}/)[1];
+  const firmware = [...body.matchAll(/return "([^"]*)"/g)].map((m) => m[1]);
+  assert.deepStrictEqual(firmware, [...new Set(cases.map((c) => c.msg))], "firmware messages = settings UI messages");
 }
 
 async function joinsWifiAndKeepsTheAp() {
@@ -183,11 +211,22 @@ async function joinsWifiAndKeepsTheAp() {
     "Stored. The DSP now joins \"home\". Once connected, it is reachable in that network on the IP shown above; the access point stays available.");
   assert.strictEqual(p.elements.pwd.value, "", "the password is cleared after storing");
 
-  const q = run(page, { "/wifi": { status: 400, body: "WiFi name can have at most 32 characters" } });
+  const q = run(page, { "/wifi": { status: 400, body: "The network name can have at most 32 characters." } });
   Object.assign(q.context.document.getElementById("ssid"), { value: "home" });
   await q.context.joinWifi();
   assert.deepStrictEqual(JSON.parse(q.requests[0].options.body), { ssid: "home", pwd: "" }, "open network");
-  assert.strictEqual(q.elements.smsg.textContent, "Not stored: WiFi name can have at most 32 characters");
+  assert.strictEqual(q.elements.smsg.textContent, "Not stored: The network name can have at most 32 characters.");
+}
+
+// The page has its own "Forget network" button, so "Join network" refuses an empty name
+// (the settings UI has one button only and forgets the network on an empty name).
+async function joinRefusesEmptyName() {
+  const p = run(page, {});
+  Object.assign(p.context.document.getElementById("pwd"), { value: "secret123" });
+  await p.context.joinWifi();
+  assert.strictEqual(p.elements.smsg.textContent,
+    "Please enter the name of the network to join. To stop using a network, use \"Forget network\".");
+  assert.strictEqual(p.requests.length, 0, "nothing is sent");
 }
 
 async function forgetsWifiAndKeepsTheAp() {
@@ -245,8 +284,12 @@ async function refreshesConnectionWhileOpen() {
   assert.strictEqual(p.tick(), 0, "no refresh once the dialog is closed");
 }
 
-// "AP off while connected" (ADR 0005): the same texts in the matrix page and the settings UI.
-const APOFF_ON = "Stored. The access point switches off 30 s after the DSP has joined its WiFi; the DSP is then only reachable on its WiFi IP. The access point comes back when the connection is lost.";
+// "AP off while connected": the same texts in the matrix page and the settings UI. The grace
+// time in them is the firmware's, so changing ApSwitch::GRACE_MS without the texts fails here.
+const GRACE_MS = Number(fs.readFileSync("SOURCES/WEBAPP/ESP32/aurora/apswitch.h", "utf8")
+  .match(/GRACE_MS\s*=\s*(\d+)/)[1]);
+const GRACE = GRACE_MS / 1000 + " s";
+const APOFF_ON = "Stored. The access point switches off " + GRACE + " after the DSP has joined its WiFi; the DSP is then only reachable on its WiFi IP. The access point comes back when the connection is lost.";
 const APOFF_OFF = "Stored. The access point stays available.";
 
 async function showsStoredApOffSetting() {
@@ -321,18 +364,20 @@ async function joinNoteMentionsTheApGoingOff() {
   await p.context.joinWifi();
   assert.deepStrictEqual(JSON.parse(p.requests[0].options.body), { ssid: "home", pwd: "secret123" });
   assert.strictEqual(p.elements.smsg.textContent,
-    "Stored. The DSP now joins \"home\". Once connected, it is reachable in that network on the IP shown above; the access point then switches off after 30 s.");
+    "Stored. The DSP now joins \"home\". Once connected, it is reachable in that network on the IP shown above; the access point then switches off after " + GRACE + ".");
 }
 
 async function main() {
   await opensWithCurrentApConfig();
   await showsOpenApWarningLikeSettings();
+  await openApWarningOnlyWhileTheApIsUp();
   await rejectsInvalidInputWithSettingsMessages();
   await storesValidConfigWithRestartNote();
   await showsFirmwareRefusal();
   await closes();
   await rejectsInvalidWifiWithSettingsMessages();
   await joinsWifiAndKeepsTheAp();
+  await joinRefusesEmptyName();
   await forgetsWifiAndKeepsTheAp();
   await showsStoredNetworkAndConnection();
   await refreshesConnectionWhileOpen();

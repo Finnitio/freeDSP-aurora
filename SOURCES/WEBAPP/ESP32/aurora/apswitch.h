@@ -5,7 +5,7 @@
 
 //==============================================================================
 /*! Decides when the AP is switched off and on again (setting "AP off while
- *  connected", docs/adr 0005). Pure logic, no WiFi calls, so it can be tested
+ *  connected"). Pure logic, no WiFi calls, so it can be tested
  *  on the host.
  *
  *  With the option off the AP is always up. With the option on the AP stops
@@ -21,6 +21,7 @@ public:
 
   //! Time to read the WiFi IP (shown on the display and in the WiFi dialog)
   //! before the AP goes away.
+  //! The WiFi dialogs name it in their texts (test_matrixwifi.js checks they match).
   static const uint32_t GRACE_MS = 30000;
 
   //----------------------------------------------------------------------------

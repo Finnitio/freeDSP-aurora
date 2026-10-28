@@ -371,8 +371,11 @@ function refreshWifiState(){
 }
 function apWarningText(d){
   if(!d.apopenfallback)return "";
+  var why=d.appwderror?" ("+d.appwderror+")":"";
+  if(d.apup===false)  // "AP off while connected": not open now, but once it is back
+    return "Note: the access point is off now. When it comes back it runs OPEN because the stored AP password is invalid"+why+". Store a valid AP password and restart.";
   return "Warning: the access point is running OPEN because the stored AP password is invalid"
-   +(d.appwderror?" ("+d.appwderror+")":"")+". Anyone nearby can reach this DSP. Store a valid AP password and restart.";
+   +why+". Anyone nearby can reach this DSP. Store a valid AP password and restart.";
 }
 function apCheck(d){
   if(d.pwdap.length>0&&d.pwdap.length<8)return "Please select a password with at least 8 characters.";
@@ -400,8 +403,8 @@ function wifiCheck(d){
 }
 function joinWifi(){
   var d={ssid:wifiEl("ssid").value,pwd:wifiEl("pwd").value};
-  if(!d.ssid)d.pwd="";
-  var e=wifiCheck(d);
+  // unlike the settings UI, an empty name does not forget the network here: that has its own button
+  var e=d.ssid?wifiCheck(d):"Please enter the name of the network to join. To stop using a network, use \"Forget network\".";
   if(e){ssay(e);return Promise.resolve();}
   return postWifi(d,"Stored. The DSP now joins \""+d.ssid+"\". Once connected, it is reachable in that network on the IP shown above; the access point "
    +(wifiEl("apoff").checked?"then switches off after 30 s.":"stays available."));
@@ -418,8 +421,8 @@ function postWifi(d,ok){
      else ssay("Not stored: "+t);});})
    .catch(function(){ssay("Not stored: no answer from the DSP");});
 }
-// "AP off while connected" (docs/adr 0005), applied at once; the same texts as sendApOff() in aurora.js.
-// 30 s = ApSwitch::GRACE_MS
+// "AP off while connected", applied at once; the same texts as sendApOff() in aurora.js.
+// 30 s here and in joinWifi() = ApSwitch::GRACE_MS (checked by test_matrixwifi.js)
 function storeApOff(){
   var c=wifiEl("apoff").checked===true;
   ssay("Storing...");

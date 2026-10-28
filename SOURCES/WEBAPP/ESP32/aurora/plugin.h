@@ -21,7 +21,7 @@ struct tSettings
   int apchannel;
   int adcsum;
   bool wifiOn;
-  bool apOffWhileConnected;  //!< stop the AP while the STA is connected (docs/adr 0005)
+  volatile bool apOffWhileConnected;  //!< stop the AP while the STA is connected (written by web, read by the WiFi task)
 };
 
 typedef uint8_t tFilterType;
