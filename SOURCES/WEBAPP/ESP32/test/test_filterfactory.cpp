@@ -1,6 +1,6 @@
 // Host tests for the Butterworth and Linkwitz-Riley designs of the AudioFilterFactory.
-// Build & run:
-//   g++ -std=gnu++11 -Wall -o test_filterfactory SOURCES/WEBAPP/ESP32/test/test_filterfactory.cpp SOURCES/WEBAPP/ESP32/aurora/AudioFilterFactory.cpp && ./test_filterfactory
+// Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
+// Links: AudioFilterFactory.cpp
 #include <cassert>
 #include <cmath>
 #include <cstdio>

@@ -1,5 +1,5 @@
 // The WiFi dialog on the Matrix page: same checks, messages and warning as the settings UI.
-// Run: node SOURCES/WEBAPP/ESP32/test/test_matrixwifi.js
+// Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
 const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");

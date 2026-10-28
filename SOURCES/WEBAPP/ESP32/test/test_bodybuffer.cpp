@@ -1,5 +1,5 @@
 // Host tests for POST body reassembly.
-// Build & run: g++ -std=c++11 -Wall -o test_bodybuffer SOURCES/WEBAPP/ESP32/test/test_bodybuffer.cpp && ./test_bodybuffer
+// Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
 #include <cassert>
 #include <cstdio>
 #include <cstring>
