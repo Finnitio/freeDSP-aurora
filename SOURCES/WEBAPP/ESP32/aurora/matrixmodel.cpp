@@ -391,6 +391,14 @@ void MatrixModel::writeChannelChanges( bool isBus, int idx, const Channel& befor
   const MatrixChannelKind kind = isBus ? MATRIX_BUS : MATRIX_OUT;
   const double lin = linear( after );
   const bool switched = after.sel != before.sel;
+  std::vector<Coef> beforeStages, afterStages;
+  stages( before, beforeStages );
+  stages( after, afterStages );
+  int changedStages = 0;
+  for( int s = 0; s < nbiquad_; s++ )
+    if( memcmp( &beforeStages[s], &afterStages[s], sizeof( Coef ) ) != 0 )
+      changedStages++;
+  const bool filtersRamp = changedStages > 1 && lin != 0.0;
   if( switched && lin != 0.0 )
   {
     port_.writeGain( kind, idx, 0.0 );
@@ -400,7 +408,8 @@ void MatrixModel::writeChannelChanges( bool isBus, int idx, const Channel& befor
   }
   else
   {
-    if( lin != linear( before ) ) port_.writeGain( kind, idx, lin );
+    // writeStages() restores the new gain after its own ramp, so do not write it twice.
+    if( lin != linear( before ) && !filtersRamp ) port_.writeGain( kind, idx, lin );
     if( switched )
     {
       if( isBus ) port_.writeSource( idx, (uint32_t)after.sel ); else port_.writeRoute( idx, after.sel );

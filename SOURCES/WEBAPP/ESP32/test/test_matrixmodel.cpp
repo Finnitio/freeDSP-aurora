@@ -1138,7 +1138,7 @@ static void linkedAspectsPropagateAndJoiningCopiesAbsoluteValues()
   DynamicJsonDocument st = stateOf(m);
   assert(st["outs"][1]["mute"] == false && st["outs"][1]["gain"] == -3);
   assert(st["outs"][1]["delaySamples"] == 48 && st["outs"][1]["slots"].size() == 1);
-  assert(only(port, 'g').size() == 1 && only(port, 'd').size() == 1);
+  assert(only(port, 'g').size() == 2 && only(port, 'g')[0].val == 0.0 && only(port, 'd').size() == 1);
   assert(port.bq.size() == 2 && port.bq[0].idx == 1);
 
   port.w.clear(); port.bq.clear();
