@@ -180,15 +180,15 @@ function row(ch,idx,c,sel){
    +"<button class='mute' onclick=\"openF('"+ch+"',"+idx+")\">Filter</button>"
    +field("g"+ch+idx,ch,idx,-1,"gain",c.gain)+"<span>dB</span></div>";
 }
-function sendLink(scope,id,key,value){
-  var p={ch:"link",scope:scope,group:id,preset:activePreset};p[key]=value;
+function sendLink(id,key,value){
+  var p={linkGroup:id,preset:activePreset};p[key]=value;
   return post(p);
 }
 function linkPanel(scope,l){
   var keys=["mute","filters","gain","delay"],names=["Mute","Filters","Gain","Delay"];
   return "<div class='row linkset'><b>"+(scope=="bus"?"Bus link":l.id)+"</b>"+keys.map(function(k,i){
     var disabled=scope=="bus"&&k=="delay";
-    return "<button"+(disabled?" disabled":"")+" class='"+(l[k]?"on":"")+"' onclick=\"sendLink('"+scope+"','"+l.id+"','"+k+"',"+!l[k]+")\">"+names[i]+"</button>";
+    return "<button"+(disabled?" disabled":"")+" class='"+(l[k]?"on":"")+"' onclick=\"sendLink('"+l.id+"','"+k+"',"+!l[k]+")\">"+names[i]+"</button>";
   }).join("")+"</div>";
 }
 function busy(sel){

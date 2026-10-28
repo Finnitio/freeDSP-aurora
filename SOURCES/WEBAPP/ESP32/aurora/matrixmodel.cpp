@@ -19,8 +19,8 @@ static const int kNumRoutes = 3;  // Bus 1, Bus 2, Bus 1+2
 static const uint32_t kPortAnalog = 0, kPortUsb = 1, kPortExp = 2, kPortSpdif = 4, kPortOut = 5;
 
 //==============================================================================
-/*! Link group of an id within its scope: "" = -1 (none), "bus" = 0 for Buses, "A".."D" = 0..3 for
- *  Outputs, -2 for anything else. */
+/*! Link group of an id within a Channel's scope: "" = -1 (none), "bus" = 0 for Buses, "A".."D" = 0..3
+ *  for Outputs, -2 for anything else. */
 static int linkFromId( const char* id, bool isBus )
 {
   if( id[0] == 0 )
@@ -30,7 +30,17 @@ static int linkFromId( const char* id, bool isBus )
   return strlen( id ) == 1 && id[0] >= 'A' && id[0] < 'A' + MATRIX_OUT_LINKS ? id[0] - 'A' : -2;
 }
 
-/*! The id of a link group, inverse of linkFromId(); buf holds at least 4 chars. Returns a
+/*! A Link group named on its own: "A".."D" = 0..3 (Outputs), "bus" = kBusLinkGroup, -2 for
+ *  anything else, NULL included. */
+static const int kBusLinkGroup = MATRIX_OUT_LINKS;
+static int linkGroupFromId( const char* id )
+{
+  if( !id || id[0] == 0 ) return -2;
+  if( strcmp( id, "bus" ) == 0 ) return kBusLinkGroup;
+  return linkFromId( id, false );
+}
+
+/*! The id of a Link group, inverse of linkFromId(); buf holds at least 4 chars. Returns a
  *  non-const char* so ArduinoJson copies it. */
 static char* linkId( char* buf, int link, bool isBus )
 {
@@ -522,68 +532,71 @@ MatrixEditResult MatrixModel::apply( JsonObject patch, uint32_t nowMs )
   return { reason.empty() ? MATRIX_EDIT_OK : MATRIX_EDIT_BAD_REQUEST, reason };
 }
 
+std::string MatrixModel::applyLinkGroup( JsonObject patch, uint32_t nowMs )
+{
+  const int parsed = linkGroupFromId( patch["linkGroup"].as<const char*>() );
+  if( parsed == -2 ) return "no such Link group";
+  const bool isBus = parsed == kBusLinkGroup;
+  const int linkGroup = isBus ? 0 : parsed;
+  LinkGroup next = isBus ? busLink_ : outLink_[linkGroup];
+  bool touched = false;
+  for( JsonPair kv : patch )
+  {
+    const char* key = kv.key().c_str();
+    if( strcmp( key, "linkGroup" ) == 0 ) continue;
+    if( strcmp( key, "mute" ) != 0 && strcmp( key, "filters" ) != 0 && strcmp( key, "gain" ) != 0
+        && strcmp( key, "delay" ) != 0 )
+      return std::string( "unknown field " ) + key;
+    if( !kv.value().is<bool>() ) return std::string( key ) + " must be true or false";
+    const bool v = kv.value().as<bool>();
+    if( strcmp( key, "mute" ) == 0 ) next.mute = v;
+    else if( strcmp( key, "filters" ) == 0 ) next.filters = v;
+    else if( strcmp( key, "gain" ) == 0 ) next.gain = v;
+    else
+    {
+      if( isBus && v ) return "Buses have no delay link";
+      next.delay = v;
+    }
+    touched = true;
+  }
+  if( !touched ) return "missing linked aspect";
+
+  Snapshot before;
+  snapshot( before );
+  LinkGroup old = isBus ? busLink_ : outLink_[linkGroup];
+  saveUndo();
+  ( isBus ? busLink_ : outLink_[linkGroup] ) = next;
+
+  // When an aspect becomes linked, the first member supplies its absolute value.
+  Channel* anchor = NULL;
+  const int count = isBus ? nbus_ : nout_;
+  for( int i = 0; i < count && !anchor; i++ )
+  {
+    Channel& c = isBus ? bus_[i] : out_[i];
+    if( c.link == linkGroup ) anchor = &c;
+  }
+  if( anchor ) for( int i = 0; i < count; i++ )
+  {
+    Channel& c = isBus ? bus_[i] : out_[i];
+    if( c.link != linkGroup || &c == anchor ) continue;
+    if( next.mute && !old.mute ) c.mute = anchor->mute;
+    if( next.gain && !old.gain ) { c.gain = anchor->gain; c.gainBypass = anchor->gainBypass; }
+    if( next.delay && !old.delay ) { c.delay = anchor->delay; c.delayBypass = anchor->delayBypass; }
+    if( next.filters && !old.filters ) c.slots = anchor->slots;
+  }
+  writeChanges( before );
+  dirty_ = true;
+  lastChange_ = nowMs;
+  return "";
+}
+
 std::string MatrixModel::applyPatch( JsonObject patch, uint32_t nowMs )
 {
+  if( patch.containsKey( "linkGroup" ) )
+    return applyLinkGroup( patch, nowMs );
   const char* kind = patch["ch"].as<const char*>();
   if( !kind )
     return "missing ch";
-  if( strcmp( kind, "link" ) == 0 )
-  {
-    const char* scope = patch["scope"].as<const char*>();
-    const char* id = patch["group"].as<const char*>();
-    const bool isBus = scope && strcmp( scope, "bus" ) == 0;
-    if( !isBus && ( !scope || strcmp( scope, "out" ) != 0 ) ) return "link scope must be bus or out";
-    const int group = id ? linkFromId( id, isBus ) : -2;
-    if( group < 0 ) return "link group outside channel scope";
-    LinkGroup next = isBus ? busLink_ : outLink_[group];
-    bool touched = false;
-    for( JsonPair kv : patch )
-    {
-      const char* key = kv.key().c_str();
-      if( strcmp( key, "ch" ) == 0 || strcmp( key, "scope" ) == 0 || strcmp( key, "group" ) == 0 ) continue;
-      if( !kv.value().is<bool>() ) return std::string( key ) + " must be true or false";
-      const bool v = kv.value().as<bool>();
-      if( strcmp( key, "mute" ) == 0 ) next.mute = v;
-      else if( strcmp( key, "filters" ) == 0 ) next.filters = v;
-      else if( strcmp( key, "gain" ) == 0 ) next.gain = v;
-      else if( strcmp( key, "delay" ) == 0 )
-      {
-        if( isBus && v ) return "buses have no delay link";
-        next.delay = v;
-      }
-      else return std::string( "unknown field " ) + key;
-      touched = true;
-    }
-    if( !touched ) return "missing link setting";
-
-    Snapshot before;
-    snapshot( before );
-    LinkGroup old = isBus ? busLink_ : outLink_[group];
-    saveUndo();
-    ( isBus ? busLink_ : outLink_[group] ) = next;
-
-    // When an aspect becomes linked, the first member supplies its absolute value.
-    Channel* anchor = NULL;
-    const int count = isBus ? nbus_ : nout_;
-    for( int i = 0; i < count && !anchor; i++ )
-    {
-      Channel& c = isBus ? bus_[i] : out_[i];
-      if( c.link == group ) anchor = &c;
-    }
-    if( anchor ) for( int i = 0; i < count; i++ )
-    {
-      Channel& c = isBus ? bus_[i] : out_[i];
-      if( c.link != group || &c == anchor ) continue;
-      if( next.mute && !old.mute ) c.mute = anchor->mute;
-      if( next.gain && !old.gain ) { c.gain = anchor->gain; c.gainBypass = anchor->gainBypass; }
-      if( next.delay && !old.delay ) { c.delay = anchor->delay; c.delayBypass = anchor->delayBypass; }
-      if( next.filters && !old.filters ) c.slots = anchor->slots;
-    }
-    writeChanges( before );
-    dirty_ = true;
-    lastChange_ = nowMs;
-    return "";
-  }
   if( strcmp( kind, "spdif" ) == 0 )
   {
     if( !patch["sel"].is<long>() || !spdifPairValid( patch["sel"].as<long>(), nout_ ) )
@@ -697,9 +710,9 @@ std::string MatrixModel::applyPatch( JsonObject patch, uint32_t nowMs )
     {
       const char* id = v.as<const char*>();
       if( !id ) return "link must be a string";
-      const int group = linkFromId( id, isBus );
-      if( group == -2 ) return "link group outside channel scope";
-      next.link = group;
+      const int linkGroup = linkFromId( id, isBus );
+      if( linkGroup == -2 ) return "Link group outside the Channel's scope";
+      next.link = linkGroup;
       linkChanged = next.link != prev.link;
     }
     else if( strcmp( key, "source" ) == 0 && isBus )
@@ -718,22 +731,22 @@ std::string MatrixModel::applyPatch( JsonObject patch, uint32_t nowMs )
       return std::string( "unknown field " ) + key;
   }
 
-  // A joining Channel takes the enabled aspects from the group's first existing member, so it
+  // A joining Channel takes the linked aspects from the Link group's first existing member, so it
   // cannot set them in the same patch.
   if( linkChanged && next.link >= 0 )
   {
     const Channel* list = isBus ? bus_ : out_;
     const int count = isBus ? nbus_ : nout_;
-    const LinkGroup& group = isBus ? busLink_ : outLink_[next.link];
+    const LinkGroup& linked = isBus ? busLink_ : outLink_[next.link];
     for( int i = 0; i < count; i++ ) if( i != idx && list[i].link == next.link )
     {
-      const char* taken = group.mute && muteChanged ? "mute" : group.gain && gainChanged ? "gain"
-        : group.delay && delayChanged ? "delay" : group.filters && slotChanged ? "filters" : NULL;
-      if( taken ) return std::string( "a Channel joining a link group takes over its linked " ) + taken;
-      if( group.mute ) next.mute = list[i].mute;
-      if( group.gain ) { next.gain = list[i].gain; next.gainBypass = list[i].gainBypass; }
-      if( group.delay ) { next.delay = list[i].delay; next.delayBypass = list[i].delayBypass; }
-      if( group.filters ) next.slots = list[i].slots;
+      const char* taken = linked.mute && muteChanged ? "mute" : linked.gain && gainChanged ? "gain"
+        : linked.delay && delayChanged ? "delay" : linked.filters && slotChanged ? "filters" : NULL;
+      if( taken ) return std::string( "a Channel joining a Link group takes over its linked " ) + taken;
+      if( linked.mute ) next.mute = list[i].mute;
+      if( linked.gain ) { next.gain = list[i].gain; next.gainBypass = list[i].gainBypass; }
+      if( linked.delay ) { next.delay = list[i].delay; next.delayBypass = list[i].delayBypass; }
+      if( linked.filters ) next.slots = list[i].slots;
       break;
     }
   }
@@ -747,13 +760,13 @@ std::string MatrixModel::applyPatch( JsonObject patch, uint32_t nowMs )
   {
     Channel* list = isBus ? bus_ : out_;
     const int count = isBus ? nbus_ : nout_;
-    const LinkGroup& group = isBus ? busLink_ : outLink_[next.link];
+    const LinkGroup& linked = isBus ? busLink_ : outLink_[next.link];
     for( int i = 0; i < count; i++ ) if( i != idx && list[i].link == next.link )
     {
-      if( group.mute && muteChanged ) list[i].mute = next.mute;
-      if( group.gain && gainChanged ) { list[i].gain = next.gain; list[i].gainBypass = next.gainBypass; }
-      if( group.delay && delayChanged ) { list[i].delay = next.delay; list[i].delayBypass = next.delayBypass; }
-      if( group.filters && slotChanged ) list[i].slots = next.slots;
+      if( linked.mute && muteChanged ) list[i].mute = next.mute;
+      if( linked.gain && gainChanged ) { list[i].gain = next.gain; list[i].gainBypass = next.gainBypass; }
+      if( linked.delay && delayChanged ) { list[i].delay = next.delay; list[i].delayBypass = next.delayBypass; }
+      if( linked.filters && slotChanged ) list[i].slots = next.slots;
     }
   }
   writeChanges( before );
@@ -1034,7 +1047,7 @@ std::string MatrixModel::readChannel( JsonObject o, bool isBus, Channel& c ) con
     const char* id = o["link"].as<const char*>();
     if( !id ) return "bad link";
     c.link = linkFromId( id, isBus );
-    if( c.link == -2 ) return "link group outside channel scope";
+    if( c.link == -2 ) return "Link group outside the Channel's scope";
   }
   JsonArray slots = o["slots"];  // optional: presets from before the Filter row have none
   for( JsonObject s : slots )

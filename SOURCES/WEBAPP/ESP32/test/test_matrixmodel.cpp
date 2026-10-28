@@ -752,7 +752,7 @@ static void linkedParameterEditRampsMembersTogether()
   MatrixModel m(port, 2, 8, 4);
   for (int o = 2; o < 4; o++)
     assert(patch(m, ("{\"ch\":\"out\",\"idx\":" + std::to_string(o) + ",\"mute\":false,\"link\":\"B\"}").c_str()).empty());
-  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"B\",\"filters\":true}").empty());
+  assert(patch(m, "{\"linkGroup\":\"B\",\"filters\":true}").empty());
   assert(addSlot(m, "\"type\":\"peq\",\"freq\":200", "out", 2).empty());
   port.events.clear();
   assert(setSlot(m, 0, "\"gain\":-3", "out", 3).empty());
@@ -800,7 +800,7 @@ static void linkedLayoutChangeRampsMembersTogether()
   MatrixModel m(port, 2, 8, 4);
   for (int o = 2; o < 4; o++)
     assert(patch(m, ("{\"ch\":\"out\",\"idx\":" + std::to_string(o) + ",\"mute\":false,\"link\":\"B\"}").c_str()).empty());
-  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"B\",\"filters\":true}").empty());
+  assert(patch(m, "{\"linkGroup\":\"B\",\"filters\":true}").empty());
   port.events.clear();
   assert(addSlot(m, "\"type\":\"hp\",\"design\":\"lr\",\"order\":4", "out", 2).empty());
   assert(port.events.size() == 2 + 1 + 4 + 2);
@@ -1423,7 +1423,7 @@ static void linkedAspectsPropagateAndJoiningCopiesAbsoluteValues()
   MatrixModel m(port, 2, 8, 4);
   assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"mute\":false,\"gain\":-3,\"delayUs\":1000,\"link\":\"A\"}").empty());
   assert(addSlot(m, "\"type\":\"hp\",\"design\":\"lr\",\"order\":4,\"freq\":120", "out", 0).empty());
-  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"A\",\"mute\":true,\"filters\":true,\"gain\":true,\"delay\":true}").empty());
+  assert(patch(m, "{\"linkGroup\":\"A\",\"mute\":true,\"filters\":true,\"gain\":true,\"delay\":true}").empty());
 
   port.w.clear(); port.bq.clear();
   assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"link\":\"A\"}").empty());
@@ -1458,13 +1458,13 @@ static void joiningRejectsLinkedSettingsInTheSamePatch()
   FakePort port;
   MatrixModel m(port, 2, 8, 4);
   assert(patch(m, "{\"ch\":\"out\",\"idx\":0,\"mute\":false,\"gain\":-3,\"link\":\"A\"}").empty());
-  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"A\",\"mute\":true,\"gain\":true}").empty());
+  assert(patch(m, "{\"linkGroup\":\"A\",\"mute\":true,\"gain\":true}").empty());
   const std::string before = m.savePreset();
   port.w.clear();
   std::string err = patch(m, "{\"ch\":\"out\",\"idx\":1,\"gain\":4,\"link\":\"A\"}");
-  assert(err == "a Channel joining a link group takes over its linked gain");
+  assert(err == "a Channel joining a Link group takes over its linked gain");
   err = patch(m, "{\"ch\":\"out\",\"idx\":1,\"link\":\"A\",\"mute\":true}");
-  assert(err == "a Channel joining a link group takes over its linked mute");
+  assert(err == "a Channel joining a Link group takes over its linked mute");
   assert(port.w.empty() && m.savePreset() == before);
 
   // delay is not linked in A: allowed, and the gain is taken over
@@ -1475,7 +1475,7 @@ static void joiningRejectsLinkedSettingsInTheSamePatch()
   assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"gain\":2,\"link\":\"A\"}").empty());
   assert(stateOf(m)["outs"][0]["gain"] == 2);
   // first member of an empty group: nothing to take over
-  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"C\",\"gain\":true}").empty());
+  assert(patch(m, "{\"linkGroup\":\"C\",\"gain\":true}").empty());
   assert(patch(m, "{\"ch\":\"out\",\"idx\":5,\"gain\":-1,\"link\":\"C\"}").empty());
 }
 
@@ -1485,12 +1485,12 @@ static void eachLinkAspectCanBeEnabledIndependently()
   MatrixModel m(port, 2, 8, 4);
   patch(m, "{\"ch\":\"out\",\"idx\":2,\"link\":\"B\"}");
   patch(m, "{\"ch\":\"out\",\"idx\":3,\"link\":\"B\"}");
-  patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"B\",\"gain\":true}");
+  patch(m, "{\"linkGroup\":\"B\",\"gain\":true}");
   assert(patch(m, "{\"ch\":\"out\",\"idx\":2,\"gain\":4,\"delayUs\":1000,\"mute\":false}").empty());
   DynamicJsonDocument st = stateOf(m);
   assert(st["outs"][3]["gain"] == 4);
   assert(st["outs"][3]["delaySamples"] == 0 && st["outs"][3]["mute"] == true);
-  assert(!patch(m, "{\"ch\":\"link\",\"scope\":\"bus\",\"group\":\"bus\",\"delay\":true}").empty());
+  assert(!patch(m, "{\"linkGroup\":\"bus\",\"delay\":true}").empty());
 }
 
 static void enablingAnAspectMakesExistingMembersConsistent()
@@ -1500,14 +1500,14 @@ static void enablingAnAspectMakesExistingMembersConsistent()
   patch(m, "{\"ch\":\"out\",\"idx\":4,\"mute\":false,\"gain\":2,\"link\":\"D\"}");
   patch(m, "{\"ch\":\"out\",\"idx\":5,\"mute\":false,\"gain\":-12,\"link\":\"D\"}");
   port.w.clear();
-  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"D\",\"gain\":true}").empty());
+  assert(patch(m, "{\"linkGroup\":\"D\",\"gain\":true}").empty());
   DynamicJsonDocument st = stateOf(m);
   assert(st["outs"][4]["gain"] == 2 && st["outs"][5]["gain"] == 2);
   assert(only(port, 'g').size() == 1 && only(port, 'g')[0].idx == 5);
 
   patch(m, "{\"ch\":\"bus\",\"idx\":0,\"link\":\"bus\"}");
   patch(m, "{\"ch\":\"bus\",\"idx\":1,\"link\":\"bus\"}");
-  patch(m, "{\"ch\":\"link\",\"scope\":\"bus\",\"group\":\"bus\",\"mute\":true}");
+  patch(m, "{\"linkGroup\":\"bus\",\"mute\":true}");
   port.w.clear();
   assert(patch(m, "{\"ch\":\"bus\",\"idx\":1,\"mute\":true}").empty());
   assert(only(port, 'g').size() == 2);
@@ -1520,9 +1520,9 @@ static void linkGroupsRoundTripAndUndoTogether()
   MatrixModel a(port, 2, 8, 4);
   patch(a, "{\"ch\":\"out\",\"idx\":0,\"link\":\"C\"}");
   patch(a, "{\"ch\":\"out\",\"idx\":1,\"link\":\"C\"}");
-  patch(a, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"C\",\"mute\":true,\"filters\":true,\"gain\":true,\"delay\":false}");
+  patch(a, "{\"linkGroup\":\"C\",\"mute\":true,\"filters\":true,\"gain\":true,\"delay\":false}");
   patch(a, "{\"ch\":\"bus\",\"idx\":0,\"link\":\"bus\"}");
-  patch(a, "{\"ch\":\"link\",\"scope\":\"bus\",\"group\":\"bus\",\"filters\":true}");
+  patch(a, "{\"linkGroup\":\"bus\",\"filters\":true}");
   std::string saved = a.savePreset();
   FakePort port2;
   MatrixModel b(port2, 2, 8, 4);
@@ -1534,6 +1534,56 @@ static void linkGroupsRoundTripAndUndoTogether()
   patch(b, "{\"ch\":\"out\",\"idx\":0,\"mute\":false}");
   b.undo();
   assert(b.savePreset() == before);
+}
+
+// A Link group edit is addressed by the Link group's id; the Channel field never names one.
+static void linkGroupEditsAreAddressedAsLinkGroups()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  const std::string before = m.savePreset();
+  assert(patch(m, "{\"ch\":\"link\",\"scope\":\"out\",\"group\":\"A\",\"mute\":true}") == "unknown channel kind");
+  assert(patch(m, "{\"linkGroup\":\"E\",\"mute\":true}") == "no such Link group");
+  assert(patch(m, "{\"linkGroup\":\"\",\"mute\":true}") == "no such Link group");
+  assert(patch(m, "{\"linkGroup\":3,\"mute\":true}") == "no such Link group");
+  assert(patch(m, "{\"linkGroup\":\"A\",\"ch\":\"out\",\"mute\":true}") == "unknown field ch");
+  assert(patch(m, "{\"linkGroup\":\"A\"}") == "missing linked aspect");
+  assert(patch(m, "{\"linkGroup\":\"A\",\"mute\":1}") == "mute must be true or false");
+  assert(patch(m, "{\"linkGroup\":\"bus\",\"delay\":true}") == "Buses have no delay link");
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"link\":\"bus\"}") == "Link group outside the Channel's scope");
+  assert(m.savePreset() == before && port.w.empty());
+
+  MatrixEditResult r = edit(m, "{\"linkGroup\":\"bus\",\"gain\":true,\"preset\":0}");
+  assert(r.ok());
+  assert(stateOf(m)["links"]["bus"]["gain"] == true);
+  r = edit(m, "{\"linkGroup\":\"B\",\"gain\":true,\"preset\":1}");
+  assert(r.status == MATRIX_EDIT_CONFLICT);
+  assert(stateOf(m)["links"]["outs"][1]["gain"] == false);
+}
+
+// Presets saved before the Link group request was renamed (format v3) keep their
+// Link groups, memberships and linked aspects. Fixture written by commit 7930f62.
+static void v3PresetKeepsLinkGroupsAndLinkedAspects()
+{
+  const char* v3 = R"({"v":3,"spdif":0,"links":{"bus":{"mute":false,"filters":true,"gain":false},"outs":[{"mute":true,"filters":false,"gain":true,"delay":false},{"mute":false,"filters":false,"gain":false,"delay":false},{"mute":false,"filters":false,"gain":false,"delay":false},{"mute":false,"filters":false,"gain":false,"delay":true}]},"buses":[{"name":"Bus 1","source":0,"mute":false,"gain":0,"gainBypass":false,"link":"bus","slots":[]},{"name":"Bus 2","source":1,"mute":false,"gain":0,"gainBypass":false,"link":"bus","slots":[]}],"outs":[{"name":"Output 1","route":0,"mute":false,"gain":-3,"gainBypass":false,"link":"A","polarity":false,"delaySamples":0,"delayBypass":false,"slots":[]},{"name":"Output 2","route":1,"mute":false,"gain":-3,"gainBypass":false,"link":"A","polarity":false,"delaySamples":0,"delayBypass":false,"slots":[]},{"name":"Output 3","route":0,"mute":true,"gain":0,"gainBypass":false,"link":"","polarity":false,"delaySamples":0,"delayBypass":false,"slots":[]},{"name":"Output 4","route":1,"mute":true,"gain":0,"gainBypass":false,"link":"","polarity":false,"delaySamples":0,"delayBypass":false,"slots":[]},{"name":"Output 5","route":0,"mute":true,"gain":0,"gainBypass":false,"link":"D","polarity":false,"delaySamples":0,"delayBypass":false,"slots":[]},{"name":"Output 6","route":1,"mute":true,"gain":0,"gainBypass":false,"link":"","polarity":false,"delaySamples":0,"delayBypass":false,"slots":[]},{"name":"Output 7","route":0,"mute":true,"gain":0,"gainBypass":false,"link":"","polarity":false,"delaySamples":0,"delayBypass":false,"slots":[]},{"name":"Output 8","route":1,"mute":true,"gain":0,"gainBypass":false,"link":"","polarity":false,"delaySamples":0,"delayBypass":false,"slots":[]}]})";
+  FakePort port;
+  MatrixModel m(port, 2, 8, 4);
+  assert(m.loadPreset(v3).empty());
+  assert(m.savePreset() == v3);
+  DynamicJsonDocument st = stateOf(m);
+  assert(st["links"]["bus"]["filters"] == true && st["links"]["bus"]["mute"] == false);
+  assert(st["links"]["outs"][0]["mute"] == true && st["links"]["outs"][0]["gain"] == true);
+  assert(st["links"]["outs"][0]["filters"] == false && st["links"]["outs"][0]["delay"] == false);
+  assert(st["links"]["outs"][3]["delay"] == true);
+  assert(std::string(st["buses"][1]["link"].as<const char*>()) == "bus");
+  assert(std::string(st["outs"][1]["link"].as<const char*>()) == "A");
+  assert(std::string(st["outs"][4]["link"].as<const char*>()) == "D");
+  assert(std::string(st["outs"][2]["link"].as<const char*>()) == "");
+
+  // Linked gain still moves Link group A together; unlinked delay does not.
+  assert(patch(m, "{\"ch\":\"out\",\"idx\":1,\"gain\":-6,\"delayUs\":1000}").empty());
+  st = stateOf(m);
+  assert(st["outs"][0]["gain"] == -6 && st["outs"][0]["delaySamples"] == 0);
 }
 
 static void editResultsDistinguishSuccessBadRequestAndConflict()
@@ -1589,6 +1639,8 @@ int main()
   eachLinkAspectCanBeEnabledIndependently();
   enablingAnAspectMakesExistingMembersConsistent();
   linkGroupsRoundTripAndUndoTogether();
+  linkGroupEditsAreAddressedAsLinkGroups();
+  v3PresetKeepsLinkGroupsAndLinkedAspects();
   delayMicrosecondsRoundToSamples();
   delayBoundaryIs40ms();
   delayLimitFollowsThePlugin();

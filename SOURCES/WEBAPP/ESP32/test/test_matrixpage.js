@@ -39,15 +39,20 @@ async function main() {
   context.activePreset = 2;
   context.draw = () => {};
 
-  await context.sendLink("out", "B", "mute", true);
+  await context.sendLink("B", "mute", true);
 
   assert.strictEqual(request.url, "/matrix");
   assert.deepStrictEqual(JSON.parse(request.options.body), {
-    ch: "link",
-    scope: "out",
-    group: "B",
+    linkGroup: "B",
     preset: 2,
     mute: true,
+  });
+
+  await context.sendLink("bus", "filters", false);
+  assert.deepStrictEqual(JSON.parse(request.options.body), {
+    linkGroup: "bus",
+    preset: 2,
+    filters: false,
   });
 
   await context.send("out", 3, { gain: -2 });
