@@ -93,8 +93,8 @@ public:
   MatrixEditResult apply( JsonObject patch, uint32_t nowMs );
 
   /*! Reject live edits between these calls. The firmware closes this gate
-   *  before a preset switch enters the worker queue, so an edit from the old
-   *  preset cannot be queued behind the selected preset's full write set.
+   *  before a Preset switch enters the worker queue, so an edit from the old
+   *  Preset cannot be queued behind the selected Preset's full write set.
    *  begin returns false (and changes nothing) if a switch is already in progress. */
   bool beginPresetSwitch( void );
   void endPresetSwitch( void ) { presetSwitching_ = false; }

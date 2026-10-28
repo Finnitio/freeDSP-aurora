@@ -189,7 +189,7 @@ void uploadDspFirmware( void )
 
 //==============================================================================
 /*! The redraw loop() owes. Drawn only when the bus is free, so loop() never
- *  waits for a preset load or FIR upload on the worker.
+ *  waits for a Preset load or FIR upload on the worker.
  */
 static PendingRedraw pendingRedraw;
 
@@ -864,7 +864,7 @@ void loop()
   #endif
 
   // Drawn only once the bus is free, so the input above keeps being read
-  // while the worker runs a preset load or FIR upload.
+  // while the worker runs a Preset load or FIR upload.
   pendingRedraw.serve( tryDrawScreen );
 
 }
