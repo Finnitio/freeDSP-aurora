@@ -45,6 +45,7 @@ struct MatrixCoef
 #define MATRIX_MAX_BUS 2
 #define MATRIX_MAX_OUT 8
 #define MATRIX_NAME_LEN 16
+#define MATRIX_OUT_LINKS 4  // Output Link groups A..D
 #define MATRIX_MAX_DELAY_SAMPLES 1920  // 40 ms at 48 kHz
 #define MATRIX_SAVE_DELAY_MS 2000
 #define MATRIX_RAMP_MS 20  // gain slew to settle before a route/Source switch or a Slot layout change
@@ -175,7 +176,7 @@ private:
   Channel bus_[MATRIX_MAX_BUS];
   Channel out_[MATRIX_MAX_OUT];
   LinkGroup busLink_;
-  LinkGroup outLink_[4];
+  LinkGroup outLink_[MATRIX_OUT_LINKS];
   uint32_t spdif_;  // left code of the SPDIF out pair
   bool dirty_;
   uint32_t lastChange_;
@@ -188,7 +189,7 @@ private:
     Channel bus[MATRIX_MAX_BUS];
     Channel out[MATRIX_MAX_OUT];
     LinkGroup busLink;
-    LinkGroup outLink[4];
+    LinkGroup outLink[MATRIX_OUT_LINKS];
     bool dirty;
     uint32_t lastChange;
   } undo_;

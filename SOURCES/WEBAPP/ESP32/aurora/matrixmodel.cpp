@@ -19,6 +19,28 @@ static const int kNumRoutes = 3;  // Bus 1, Bus 2, Bus 1+2
 static const uint32_t kPortAnalog = 0, kPortUsb = 1, kPortExp = 2, kPortSpdif = 4, kPortOut = 5;
 
 //==============================================================================
+/*! Link group of an id within its scope: "" = -1 (none), "bus" = 0 for Buses, "A".."D" = 0..3 for
+ *  Outputs, -2 for anything else. */
+static int linkFromId( const char* id, bool isBus )
+{
+  if( id[0] == 0 )
+    return -1;
+  if( isBus )
+    return strcmp( id, "bus" ) == 0 ? 0 : -2;
+  return strlen( id ) == 1 && id[0] >= 'A' && id[0] < 'A' + MATRIX_OUT_LINKS ? id[0] - 'A' : -2;
+}
+
+/*! The id of a link group, inverse of linkFromId(); buf holds at least 4 chars. Returns a
+ *  non-const char* so ArduinoJson copies it. */
+static char* linkId( char* buf, int link, bool isBus )
+{
+  if( link < 0 ) buf[0] = 0;
+  else if( isBus ) strcpy( buf, "bus" );
+  else { buf[0] = (char)( 'A' + link ); buf[1] = 0; }
+  return buf;
+}
+
+//==============================================================================
 /*! Selectable Sources: Analog 1-8, USB 1-8, Exp 1-8, SPDIF L/R. The ESP32 mux
  *  group exists on the DSP but is not offered.
  */
@@ -376,7 +398,7 @@ void MatrixModel::reset( void )
 {
   spdif_ = spdifPairCode( 0 );
   busLink_ = (LinkGroup){ false, false, false, false };
-  for( int g = 0; g < 4; g++ )
+  for( int g = 0; g < MATRIX_OUT_LINKS; g++ )
     outLink_[g] = (LinkGroup){ false, false, false, false };
   for( int b = 0; b < nbus_; b++ )
   {
@@ -415,7 +437,7 @@ void MatrixModel::saveUndo( void )
   undo_.valid = true;
   undo_.spdif = spdif_;
   undo_.busLink = busLink_;
-  for( int g = 0; g < 4; g++ ) undo_.outLink[g] = outLink_[g];
+  for( int g = 0; g < MATRIX_OUT_LINKS; g++ ) undo_.outLink[g] = outLink_[g];
   for( int b = 0; b < nbus_; b++ ) undo_.bus[b] = bus_[b];
   for( int o = 0; o < nout_; o++ ) undo_.out[o] = out_[o];
   undo_.dirty = dirty_;
@@ -510,9 +532,7 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
     const char* id = patch["group"].as<const char*>();
     const bool isBus = scope && strcmp( scope, "bus" ) == 0;
     if( !isBus && ( !scope || strcmp( scope, "out" ) != 0 ) ) return "link scope must be bus or out";
-    int group = -1;
-    if( isBus ) group = id && strcmp( id, "bus" ) == 0 ? 0 : -1;
-    else if( id && strlen( id ) == 1 && id[0] >= 'A' && id[0] <= 'D' ) group = id[0] - 'A';
+    const int group = id ? linkFromId( id, isBus ) : -2;
     if( group < 0 ) return "link group outside channel scope";
     LinkGroup next = isBus ? busLink_ : outLink_[group];
     bool touched = false;
@@ -676,12 +696,7 @@ std::string MatrixModel::apply( JsonObject patch, uint32_t nowMs )
     {
       const char* id = v.as<const char*>();
       if( !id ) return "link must be a string";
-      int group = -1;
-      if( id[0] != 0 )
-      {
-        if( isBus ) group = strcmp( id, "bus" ) == 0 ? 0 : -2;
-        else group = strlen( id ) == 1 && id[0] >= 'A' && id[0] <= 'D' ? id[0] - 'A' : -2;
-      }
+      const int group = linkFromId( id, isBus );
       if( group == -2 ) return "link group outside channel scope";
       next.link = group;
       linkChanged = next.link != prev.link;
@@ -759,7 +774,7 @@ void MatrixModel::undo( void )
     return;
   spdif_ = undo_.spdif;
   busLink_ = undo_.busLink;
-  for( int g = 0; g < 4; g++ ) outLink_[g] = undo_.outLink[g];
+  for( int g = 0; g < MATRIX_OUT_LINKS; g++ ) outLink_[g] = undo_.outLink[g];
   for( int b = 0; b < nbus_; b++ ) bus_[b] = undo_.bus[b];
   for( int o = 0; o < nout_; o++ ) out_[o] = undo_.out[o];
   dirty_ = undo_.dirty;
@@ -826,13 +841,8 @@ void MatrixModel::putChannel( JsonArray arr, const Channel& c, const char* selKe
   o["mute"] = c.mute;
   o["gain"] = c.gain;
   o["gainBypass"] = c.gainBypass;
-  if( c.link < 0 ) o["link"] = "";
-  else if( strcmp( selKey, "source" ) == 0 ) o["link"] = "bus";
-  else
-  {
-    char id[2] = { (char)( 'A' + c.link ), 0 };
-    o["link"] = id;
-  }
+  char id[4];
+  o["link"] = linkId( id, c.link, strcmp( selKey, "source" ) == 0 );
   if( strcmp( selKey, "route" ) == 0 )  // Outputs only
   {
     o["polarity"] = c.polarity;
@@ -931,11 +941,11 @@ std::string MatrixModel::stateJson( void ) const
   busLink["id"] = "bus"; busLink["mute"] = busLink_.mute; busLink["filters"] = busLink_.filters;
   busLink["gain"] = busLink_.gain; busLink["delay"] = false;
   JsonArray outLinks = links.createNestedArray( "outs" );
-  for( int g = 0; g < 4; g++ )
+  for( int g = 0; g < MATRIX_OUT_LINKS; g++ )
   {
     JsonObject link = outLinks.createNestedObject();
-    char id[2] = { (char)( 'A' + g ), 0 };
-    link["id"] = id; link["mute"] = outLink_[g].mute; link["filters"] = outLink_[g].filters;
+    char id[4];
+    link["id"] = linkId( id, g, false ); link["mute"] = outLink_[g].mute; link["filters"] = outLink_[g].filters;
     link["gain"] = outLink_[g].gain; link["delay"] = outLink_[g].delay;
   }
   doc["spdifout"] = (long)spdif_;
@@ -966,7 +976,7 @@ std::string MatrixModel::savePreset( void ) const
   JsonObject busLink = links.createNestedObject( "bus" );
   busLink["mute"] = busLink_.mute; busLink["filters"] = busLink_.filters; busLink["gain"] = busLink_.gain;
   JsonArray outLinks = links.createNestedArray( "outs" );
-  for( int g = 0; g < 4; g++ )
+  for( int g = 0; g < MATRIX_OUT_LINKS; g++ )
   {
     JsonObject link = outLinks.createNestedObject();
     link["mute"] = outLink_[g].mute; link["filters"] = outLink_[g].filters;
@@ -1021,19 +1031,8 @@ std::string MatrixModel::readChannel( JsonObject o, bool isBus, Channel& c ) con
   {
     const char* id = o["link"].as<const char*>();
     if( !id ) return "bad link";
-    if( id[0] != 0 )
-    {
-      if( isBus )
-      {
-        if( strcmp( id, "bus" ) != 0 ) return "link group outside channel scope";
-        c.link = 0;
-      }
-      else
-      {
-        if( strlen( id ) != 1 || id[0] < 'A' || id[0] > 'D' ) return "link group outside channel scope";
-        c.link = id[0] - 'A';
-      }
-    }
+    c.link = linkFromId( id, isBus );
+    if( c.link == -2 ) return "link group outside channel scope";
   }
   JsonArray slots = o["slots"];  // optional: presets from before the Filter row have none
   for( JsonObject s : slots )
@@ -1122,13 +1121,13 @@ std::string MatrixModel::loadPreset( const std::string& json )
   }
 
   LinkGroup busLink = { false, false, false, false };
-  LinkGroup outLink[4] = {};
+  LinkGroup outLink[MATRIX_OUT_LINKS] = {};
   if( doc.containsKey( "links" ) )
   {
     JsonObject links = doc["links"];
     JsonObject b = links["bus"];
     JsonArray outsLinks = links["outs"];
-    if( b.isNull() || outsLinks.size() != 4 ) return "bad links";
+    if( b.isNull() || outsLinks.size() != MATRIX_OUT_LINKS ) return "bad links";
     const char* keys[] = { "mute", "filters", "gain" };
     bool* busValues[] = { &busLink.mute, &busLink.filters, &busLink.gain };
     for( int k = 0; k < 3; k++ )
@@ -1136,7 +1135,7 @@ std::string MatrixModel::loadPreset( const std::string& json )
       if( !b[keys[k]].is<bool>() ) return "bad links";
       *busValues[k] = b[keys[k]].as<bool>();
     }
-    for( int g = 0; g < 4; g++ )
+    for( int g = 0; g < MATRIX_OUT_LINKS; g++ )
     {
       JsonObject o = outsLinks[g];
       const char* outKeys[] = { "mute", "filters", "gain", "delay" };
@@ -1165,7 +1164,7 @@ std::string MatrixModel::loadPreset( const std::string& json )
   for( int b = 0; b < nbus_; b++ ) bus_[b] = nb[b];
   for( int o = 0; o < nout_; o++ ) out_[o] = no[o];
   busLink_ = busLink;
-  for( int g = 0; g < 4; g++ ) outLink_[g] = outLink[g];
+  for( int g = 0; g < MATRIX_OUT_LINKS; g++ ) outLink_[g] = outLink[g];
   spdif_ = spdif;
   undo_.valid = false;
   dirty_ = false;
