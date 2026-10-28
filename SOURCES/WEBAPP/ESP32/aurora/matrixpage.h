@@ -44,6 +44,11 @@ button:disabled{opacity:.4}
 #wstat{margin-bottom:6px;overflow-wrap:anywhere}
 #abt{background:#181818}  /* opaque: the active Preset letter must not show through */
 #trounds{width:76px;height:30px}
+.tr .tv{flex:0 0 64px;text-align:right}
+.tr .tp{flex:0 0 44px;text-align:right}
+.tr .tb{flex:1 1 40px;height:12px;background:#303030}
+.tr .tb i{display:block;height:100%;background:#60c060}
+.tr .tw{flex:0 0 56px}
 </style>
 </head>
 <body onload="load()">
@@ -100,7 +105,8 @@ button:disabled{opacity:.4}
 <div id="tlabels" class="row"></div>
 <div class="row"><button id="tvote" onclick="abVote()">This one is best</button><button onclick="abEnd()">Abort</button></div>
 <p>Reloading the page ends the test without switching back to the previous Preset.</p>
-</div></div></div>
+</div>
+<div id="tres" style="display:none"></div></div></div>
 <script>
 var st=null,seq=0,seen=0,late=false,view=null,cf=null,cseq=0,csig="",ct=0,activePreset=-1;
 var presetUsed=[];  // per Preset slot: has a Preset file (GET /preset "used")
@@ -412,8 +418,12 @@ function verdict(counts){
 // Client only: a reload ends the test without switching back.
 function abEl(id){return document.getElementById(id);}
 var abSel=[];  // ticked Preset slots in the setup dialog
-function abShow(setup){abEl("abt").style.display="block";abEl("tset").style.display=setup?"":"none";abEl("trun").style.display=setup?"none":"";}
-function abOpen(){if(ab)return;abSel=[];say("");showVol(abEl("vol").value);abEl("trounds").value=10;abShow(true);abTicks();}
+function abShow(id){abEl("abt").style.display="block";["tset","trun","tres"].forEach(function(x){abEl(x).style.display=x==id?"":"none";});}
+// sel, n: ticks and Rounds to start with ("Run again"); none: no ticks, 10 Rounds.
+function abOpen(sel,n){
+  if(ab)return;abSel=(sel||[]).filter(function(i){return presetUsed[i];});say("");showVol(abEl("vol").value);
+  abEl("trounds").value=n||10;abShow("tset");abTicks();
+}
 function abTicks(){
   var h="";for(var i=0;i<4;i++)h+="<button class='"+(abSel.indexOf(i)<0?"":"on")+"'"+(presetUsed[i]?"":" disabled")+" onclick='abTick("+i+")'>"+"ABCD"[i]+"</button>";
   abEl("tpre").innerHTML=h;abEl("tstart").disabled=abSel.length<2;
@@ -430,7 +440,7 @@ function abStart(){
   if(abSel.length<2||switching)return;
   var n=Math.max(3,Math.min(50,parseInt(abEl("trounds").value)||10));
   ab={pre:abSel.slice().sort(),n:n,votes:[],order:[],cur:-1,back:activePreset};
-  abShow(false);abEl("tround").textContent="Waiting for the DSP...";abEl("tlabels").innerHTML="";abEl("tvote").disabled=true;
+  abShow("trun");abEl("tround").textContent="Waiting for the DSP...";abEl("tlabels").innerHTML="";abEl("tvote").disabled=true;
   var t=ab;
   t.sw=waitIdle().then(function(){t.back=activePreset;if(!t.end)abRound();});  // Autosave done, the active Preset settled
 }
@@ -461,14 +471,25 @@ function abVote(){
 function abEnd(){
   var t=ab;if(!t||t.end)return;
   t.end=true;abEl("tround").textContent="Switching back...";abEl("tlabels").innerHTML="";abEl("tvote").disabled=true;
-  t.sw.then(function(){return preset(t.back);}).then(function(){ab=null;abClose();abResult(t.pre,t.votes);});
+  t.sw.then(function(){return preset(t.back);}).then(function(){ab=null;abClose();abResult(t.pre,t.votes,t.n);});
 }
-// Hand-off to the Evaluation: pre = the ticked Preset slots (0-3 = A-D, ascending), votes = per Round
-// the index into pre of the chosen Preset (tally(votes,pre.length)). No Votes: nothing to show.
-function abResult(pre,votes){
+// Evaluation: pre = the ticked Preset slots (0-3 = A-D, ascending), votes = per Round the index into
+// pre of the chosen Preset, n = Rounds set (fewer Votes: aborted). Per Preset its real letter, Votes,
+// share and bar, the winner marked, then the verdict. No Votes: nothing to show.
+function abResult(pre,votes,n){
   if(!votes.length)return;
-  var c=tally(votes,pre.length).counts;
-  say("A/B test Votes: "+pre.map(function(p,i){return "ABCD"[p]+" "+c[i];}).join(", "));
+  var t=tally(votes,pre.length),v=verdict(t.counts),
+      h=votes.length<n?"<p>Aborted after "+votes.length+" of "+n+" Rounds.</p>":"";
+  pre.forEach(function(p,i){
+    var c=t.counts[i],pc=Math.round(t.pct[i]);
+    h+="<div class='row tr'><b class='lbl'>"+"ABCD"[p]+"</b><span class='tv'>"+c+" Vote"+(c==1?"":"s")+"</span><span class='tp'>"+pc+
+       "%</span><span class='tb'><i style='width:"+pc+"%'></i></span><b class='tw'>"+(i==v.winner?"Winner":"")+"</b></div>";
+  });
+  // p is rounded for display: it carries float noise from the sum.
+  h+="<p>"+(v.winner<0?"No winner: tie for first.":"Winner: "+"ABCD"[pre[v.winner]]+". "+(v.p===null?"Fewer than 3 Votes: no p-value.":
+     (v.p<0.001?"p &lt; 0.001":"p = "+(+v.p.toFixed(3)))+": "+(v.sig?"significant.":"not significant, could be chance.")))+"</p>";
+  abEl("tres").innerHTML=h+"<div class='row'><button onclick='abClose()'>Close</button><button onclick='abOpen(["+pre+"],"+n+")'>Run again</button></div>";
+  abShow("tres");
 }
 
 // ---- WiFi dialog: the same checks, messages and open-AP warning as the settings UI (aurora.js)

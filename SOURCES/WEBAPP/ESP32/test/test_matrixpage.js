@@ -34,6 +34,7 @@ vm.runInContext(script[1], context);
 
 const realCoeffs = context.coeffs;
 const realDraw = context.draw;
+const realAbResult = context.abResult;
 
 async function main() {
   context.activePreset = 2;
@@ -134,6 +135,7 @@ async function main() {
   await exportImportTests();
   await presetUsedTests();
   await presetTestTests();
+  evaluationTests();
   console.log("matrix page tests passed");
 }
 
@@ -723,6 +725,70 @@ async function presetTestTests() {
     s.forEach((v, j) => seen[j].add(v));
   }
   assert(seen.every((x) => x.size == 3), "the labels are reshuffled");
+}
+
+// ---- Evaluation of a Preset test: the result panel, read as plain text.
+function evaluationTests() {
+  context.abResult = realAbResult;
+  const text = () => element("tres").innerHTML.replace(/<button.*?<\/button>/g, "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").replace(/&lt;/g, "<").trim();
+  // One row per Preset: real letter, Votes, share, bar; the winner is marked.
+  const rows = () => [...element("tres").innerHTML.matchAll(/<div class='row tr'>(.*?)<\/div>/g)]
+    .map((m) => m[1].replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim());
+  const bars = () => [...element("tres").innerHTML.matchAll(/width:(\d+)%/g)].map((m) => +m[1]);
+  const shown = () => element("abt").style.display == "block" && element("tres").style.display == "";
+
+  // A clear winner of 2 Presets that could still be chance: 8:2 is p = 0.109 (two-sided binomial).
+  context.abResult([1, 3], [1, 1, 0, 1, 1, 1, 1, 0, 1, 1], 10);
+  assert(shown(), "the Evaluation is shown in the overlay");
+  assert.strictEqual(element("tset").style.display, "none");
+  assert.strictEqual(element("trun").style.display, "none");
+  assert.deepStrictEqual(rows(), ["B 2 Votes 20%", "D 8 Votes 80% Winner"], "real letters, Votes, %, winner marked");
+  assert.deepStrictEqual(bars(), [20, 80], "the bars follow the shares");
+  assert(text().endsWith("Winner: D. p = 0.109: not significant, could be chance."), text());
+  assert(!/Aborted/.test(text()), "a complete test is not called aborted");
+
+  // A significant winner among 4 Presets; p carries float noise and is shown rounded.
+  context.abResult([0, 1, 2, 3], [2, 2, 2, 2, 2, 2, 2, 2, 2, 2], 10);
+  assert.deepStrictEqual(rows(), ["A 0 Votes 0%", "B 0 Votes 0%", "C 10 Votes 100% Winner", "D 0 Votes 0%"],
+    "4 Presets get 4 rows, a Preset nobody chose included");
+  assert(text().endsWith("Winner: C. p < 0.001: significant."), text());
+  context.abResult([0, 1, 2], [1, 1, 1, 1, 1], 5);  // p = 3/243
+  assert(text().endsWith("Winner: B. p = 0.012: significant."), text());
+
+  // A tie for first has no winner.
+  context.abResult([0, 2], [0, 1, 1, 0], 4);
+  assert.deepStrictEqual(rows(), ["A 2 Votes 50%", "C 2 Votes 50%"], "nobody is marked on a tie");
+  assert(text().endsWith("No winner: tie for first."), text());
+
+  // Aborted: the partial result; below 3 Votes there is no p-value. One Vote is singular.
+  context.abResult([0, 1, 3], [2, 2], 10);
+  assert(text().startsWith("Aborted after 2 of 10 Rounds."), text());
+  assert.deepStrictEqual(rows(), ["A 0 Votes 0%", "B 0 Votes 0%", "D 2 Votes 100% Winner"]);
+  assert(text().endsWith("Winner: D. Fewer than 3 Votes: no p-value."), text());
+  assert(!/p [=<]/.test(text()), "no p-value below 3 Votes");
+  context.abResult([0, 1], [0], 10);
+  assert.deepStrictEqual(rows(), ["A 1 Vote 100% Winner", "B 0 Votes 0%"]);
+
+  // Run again: the setup reopens with the same ticks and Rounds.
+  context.presetUsed = [true, true, false, true];
+  context.abResult([1, 3], [0, 1, 1, 1], 7);
+  click("tres", "Run again");
+  assert.strictEqual(element("tset").style.display, "", "Run again opens the setup");
+  assert.deepStrictEqual(buttons("tpre").filter((b) => b.on).map((b) => b.text), ["B", "D"], "same ticks");
+  assert.strictEqual(+element("trounds").value, 7, "same Rounds");
+  assert(!element("tstart").disabled, "ready to start");
+  context.abClose();
+  context.abOpen();
+  assert.deepStrictEqual(buttons("tpre").filter((b) => b.on).map((b) => b.text), [], "the Test button starts fresh");
+  assert.strictEqual(+element("trounds").value, 10);
+  context.abClose();
+
+  // Close hides the overlay; zero Votes (abort in Round 1) shows nothing.
+  context.abResult([0, 1], [1, 1, 1], 3);
+  click("tres", "Close");
+  assert.strictEqual(element("abt").style.display, "none", "Close hides the Evaluation");
+  context.abResult([0, 1], [], 10);
+  assert.strictEqual(element("abt").style.display, "none", "no Votes: the overlay stays closed");
 }
 
 // Evaluation statistics of a Preset test: exact multinomial test against equal liking.
