@@ -247,13 +247,46 @@ static void badPresetIsRejectedAndKeepsState()
 static void loadDefaultsResetsAndWritesEverything()
 {
   FakePort port;
-  MatrixModel m(port, 2, 8);
+  const int budget = 4;
+  MatrixModel m(port, 2, 8, budget);
   std::string fresh = m.savePreset();
+  for (int b = 0; b < 2; b++)
+  {
+    char json[96];
+    snprintf(json, sizeof(json), "{\"ch\":\"bus\",\"idx\":%d,\"slot\":{\"op\":\"add\",\"type\":\"peq\"}}", b);
+    assert(patch(m, json).empty());
+  }
+  for (int o = 0; o < 8; o++)
+  {
+    char json[96];
+    snprintf(json, sizeof(json), "{\"ch\":\"out\",\"idx\":%d,\"slot\":{\"op\":\"add\",\"type\":\"peq\"}}", o);
+    assert(patch(m, json).empty());
+  }
   patch(m, "{\"ch\":\"out\",\"idx\":0,\"mute\":false,\"name\":\"X\"}", 10);
   port.w.clear();
+  port.bq.clear();
   m.loadDefaults();
+
+  DynamicJsonDocument st = stateOf(m);
+  for (int b = 0; b < 2; b++)
+  {
+    assert(st["buses"][b]["slots"].size() == 0);
+    assert(st["buses"][b]["used"] == 0);
+    assert(st["buses"][b]["free"] == budget);
+  }
+  for (int o = 0; o < 8; o++)
+  {
+    assert(st["outs"][o]["slots"].size() == 0);
+    assert(st["outs"][o]["used"] == 0);
+    assert(st["outs"][o]["free"] == budget);
+    assert(st["outs"][o]["mute"] == true);
+  }
   assert(m.savePreset() == fresh);
   assert(port.w.size() == 4 + 32 + 1);
+  assert(port.bq.size() == 10 * budget);
+  for (size_t i = 0; i < port.bq.size(); i++)
+    assert(port.bq[i].a[0] == 1 && port.bq[i].a[1] == 0 && port.bq[i].a[2] == 0
+           && port.bq[i].b[0] == 1 && port.bq[i].b[1] == 0 && port.bq[i].b[2] == 0);
   assert(!m.dirty());
 }
 
