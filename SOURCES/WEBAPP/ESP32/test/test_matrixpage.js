@@ -665,6 +665,7 @@ async function presetTestTests() {
   // Round 1: every label plays one of the ticked Presets, each exactly once.
   let behind = await reveal();
   assert.deepStrictEqual([...behind].sort(), [0, 1, 3], "the labels are a permutation of the ticked Presets");
+  assert(buttons("presets").every((b) => !b.on), "the hidden Preset row does not reveal the playing Preset");
   await vote(3, behind);
   assert.strictEqual(element("tround").textContent, "Round 2/3");
   assert(element("tvote").disabled, "a new Round starts with no current label");
@@ -688,6 +689,8 @@ async function presetTestTests() {
   assert.deepStrictEqual(switches(), [3, 1], "the original Preset is switched back after the last Vote");
   assert.strictEqual(context.activePreset, 1);
   assert.strictEqual(element("abt").style.display, "none", "the overlay is gone after the test");
+  assert.deepStrictEqual(buttons("presets").filter((b) => b.on).map((b) => b.text), ["B"],
+    "after the test the Preset row marks the active Preset again");
   assert.deepStrictEqual(ended, [{ pre: [0, 1, 3], votes: [2, 0, 2], at: sent.length }],
     "the Votes (indices into the ticked Presets) go to the Evaluation after the switch back");
   sent.length = 0;

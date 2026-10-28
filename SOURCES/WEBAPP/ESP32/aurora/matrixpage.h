@@ -135,8 +135,8 @@ function sendVol(v){  // while dragging: at once, then at most every 100 ms with
     vt=setTimeout(go,100);};
   go();
 }
-function drawPresets(cur){
-  var h="";for(var i=0;i<4;i++)h+="<button class='"+(i==cur?"on":"")+"' onclick='if(!ab)preset("+i+")'>"+"ABCD"[i]+"</button>";
+function drawPresets(cur){  // during a Preset test no slot is marked: the row is hidden, not removed
+  var h="";for(var i=0;i<4;i++)h+="<button class='"+(i==cur&&!ab?"on":"")+"' onclick='if(!ab)preset("+i+")'>"+"ABCD"[i]+"</button>";
   document.getElementById("presets").innerHTML=h;
 }
 // From the click until the state has been reloaded no Preset edit is sent: edits made meanwhile
@@ -471,7 +471,7 @@ function abVote(){
 function abEnd(){
   var t=ab;if(!t||t.end)return;
   t.end=true;abEl("tround").textContent="Switching back...";abEl("tlabels").innerHTML="";abEl("tvote").disabled=true;
-  t.sw.then(function(){return preset(t.back);}).then(function(){ab=null;abClose();abResult(t.pre,t.votes,t.n);});
+  t.sw.then(function(){return preset(t.back);}).then(function(){ab=null;drawPresets(activePreset);abClose();abResult(t.pre,t.votes,t.n);});
 }
 // Evaluation: pre = the ticked Preset slots (0-3 = A-D, ascending), votes = per Round the index into
 // pre of the chosen Preset, n = Rounds set (fewer Votes: aborted). Per Preset its real letter, Votes,
