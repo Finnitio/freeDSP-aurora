@@ -1479,6 +1479,23 @@ void handlePostAddonConfigJson( JsonObject root )
   Serial.println(F("POST /addoncfg"));
   #endif
 
+  if( isMatrixPlugin() )
+  {
+    // Matrix Plugin: part of the active Preset, autosaved, no DAC mute (ADR 0003).
+    // Other Add-ons have nothing per Preset.
+    if( Settings.addonid == ADDON_B )
+    {
+      MatrixEditResult result = matrixSetAddOn( (uint8_t)strtoul( root["i2c"][0].as<String>().c_str(), NULL, 16 ),
+                                                (uint8_t)strtoul( root["i2c"][1].as<String>().c_str(), NULL, 16 ),
+                                                (uint8_t)strtoul( root["i2c"][2].as<String>().c_str(), NULL, 16 ) );
+      if( !result.ok() )
+      {
+        Serial.print( F("[ERROR] POST /addoncfg: ") );
+        Serial.println( result.reason.c_str() );
+      }
+    }
+    return;
+  }
 
   softMuteDAC();
 

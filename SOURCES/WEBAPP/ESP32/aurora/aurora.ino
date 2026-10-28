@@ -711,8 +711,7 @@ void applyPresetSwitch( uint8_t preset ) {
   currentPreset = preset;
   if( isMatrixPlugin() )
   {
-    matrixLoadPreset();
-    updateAddOn();  // still unconditional and outside the ramp until ticket 04
+    matrixLoadPreset();  // includes the Add-on B config, written only if it differs
     return;
   }
   softMuteDAC();
