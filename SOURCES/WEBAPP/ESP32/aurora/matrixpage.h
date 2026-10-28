@@ -371,8 +371,11 @@ function refreshWifiState(){
 }
 function apWarningText(d){
   if(!d.apopenfallback)return "";
+  var why=d.appwderror?" ("+d.appwderror+")":"";
+  if(d.apup===false)  // "AP off while connected": not open now, but once it is back
+    return "Note: the access point is off now. When it comes back it runs OPEN because the stored AP password is invalid"+why+". Store a valid AP password and restart.";
   return "Warning: the access point is running OPEN because the stored AP password is invalid"
-   +(d.appwderror?" ("+d.appwderror+")":"")+". Anyone nearby can reach this DSP. Store a valid AP password and restart.";
+   +why+". Anyone nearby can reach this DSP. Store a valid AP password and restart.";
 }
 function apCheck(d){
   if(d.pwdap.length>0&&d.pwdap.length<8)return "Please select a password with at least 8 characters.";

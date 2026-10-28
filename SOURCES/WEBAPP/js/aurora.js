@@ -303,13 +303,17 @@ function getWifiConfig(){
   .catch(function(error) {console.log(error);});
 }
 
-// Warning while the AP runs open because the stored AP password is invalid
+// Warning while the AP runs open because the stored AP password is invalid; while the AP
+// is off ("AP off while connected") a note that it comes back open
 function apWarningText(data){
   if(!data.apopenfallback)
     return "";
+  var why = data.appwderror ? " (" + data.appwderror + ")" : "";
+  if(data.apup === false)
+    return "Note: the access point is off now. When it comes back it runs OPEN because the stored AP password is invalid" +
+      why + ". Store a valid AP password and restart.";
   return "Warning: the access point is running OPEN because the stored AP password is invalid" +
-    (data.appwderror ? " (" + data.appwderror + ")" : "") +
-    ". Anyone nearby can reach this DSP. Store a valid AP password and restart.";
+    why + ". Anyone nearby can reach this DSP. Store a valid AP password and restart.";
 }
 
 function hideAddon(){

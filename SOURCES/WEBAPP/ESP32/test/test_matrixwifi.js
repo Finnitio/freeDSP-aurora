@@ -76,6 +76,28 @@ async function showsOpenApWarningLikeSettings() {
     "same warning text as the settings UI");
 }
 
+// While the AP is off ("AP off while connected") it is not running open: only a note that it comes back open.
+async function openApWarningOnlyWhileTheApIsUp() {
+  const down = Object.assign({}, fallback, { connected: true, ip: "10.0.0.7", apoff: true, apup: false });
+  const p = run(page, { "/wificonfig": { status: 200, body: JSON.stringify(down) } });
+  p.context.openWifi();
+  await settle();
+  const s = run(settings, { "/wificonfig": { status: 200, body: JSON.stringify(down) } });
+  s.context.getWifiConfig();
+  await settle();
+  assert(!/running OPEN/.test(p.elements.apwarn.textContent), p.elements.apwarn.textContent);
+  assert.strictEqual(p.elements.apwarn.textContent,
+    "Note: the access point is off now. When it comes back it runs OPEN because the stored AP password is invalid"
+    + " (AP password needs at least 8 characters). Store a valid AP password and restart.");
+  assert.strictEqual(p.elements.apwarn.textContent, s.elements.apwarn.textContent, "same note as the settings UI");
+
+  const up = Object.assign({}, down, { apup: true });
+  const q = run(page, { "/wificonfig": { status: 200, body: JSON.stringify(up) } });
+  q.context.openWifi();
+  await settle();
+  assert(/running OPEN/.test(q.elements.apwarn.textContent), "the AP is up: the warning is shown");
+}
+
 // Each invalid entry: the settings UI's alert text is the expected message on the matrix page.
 async function rejectsInvalidInputWithSettingsMessages() {
   const cases = [
@@ -327,6 +349,7 @@ async function joinNoteMentionsTheApGoingOff() {
 async function main() {
   await opensWithCurrentApConfig();
   await showsOpenApWarningLikeSettings();
+  await openApWarningOnlyWhileTheApIsUp();
   await rejectsInvalidInputWithSettingsMessages();
   await storesValidConfigWithRestartNote();
   await showsFirmwareRefusal();
