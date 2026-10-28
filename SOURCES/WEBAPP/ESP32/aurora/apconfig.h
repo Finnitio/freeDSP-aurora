@@ -33,8 +33,9 @@ static inline const char* apConfigError( const char* pwd, const char* name, int 
 
 //------------------------------------------------------------------------------
 /*! Returns NULL if the credentials for joining a WiFi (STA) are valid, else a
- *  message for the UI. An empty SSID forgets the network (the password is
- *  then ignored), an empty password joins an open network.
+ *  message for the UI, worded as in the web UIs (test_matrixwifi.js checks
+ *  it). An empty SSID forgets the network (the password is then ignored), an
+ *  empty password joins an open network.
  */
 static inline const char* staConfigError( const char* ssid, const char* pwd )
 {
@@ -42,9 +43,9 @@ static inline const char* staConfigError( const char* ssid, const char* pwd )
   const size_t pwdLen = strlen( pwd );
 
   if( ssidLen > 32 )
-    return "WiFi name can have at most 32 characters";
+    return "The network name can have at most 32 characters.";
   if( ssidLen > 0 && ( ( pwdLen > 0 && pwdLen < 8 ) || pwdLen > 63 ) )
-    return "WiFi password needs 8 to 63 characters, or none for an open network";
+    return "The WiFi password must have 8 to 63 characters, or be empty for an open network.";
   return NULL;
 }
 

@@ -190,6 +190,12 @@ async function rejectsInvalidWifiWithSettingsMessages() {
     assert.strictEqual(p.elements.smsg.textContent, c.msg, JSON.stringify(c));
     assert.strictEqual(p.requests.length, 0, "nothing is sent for " + JSON.stringify(c));
   }
+
+  // The firmware refuses the same entries with the same texts (staConfigError in apconfig.h).
+  const body = fs.readFileSync("SOURCES/WEBAPP/ESP32/aurora/apconfig.h", "utf8")
+    .match(/staConfigError\([^)]*\)\s*\{([\s\S]*?)\n\}/)[1];
+  const firmware = [...body.matchAll(/return "([^"]*)"/g)].map((m) => m[1]);
+  assert.deepStrictEqual(firmware, [...new Set(cases.map((c) => c.msg))], "firmware messages = settings UI messages");
 }
 
 async function joinsWifiAndKeepsTheAp() {
@@ -205,11 +211,11 @@ async function joinsWifiAndKeepsTheAp() {
     "Stored. The DSP now joins \"home\". Once connected, it is reachable in that network on the IP shown above; the access point stays available.");
   assert.strictEqual(p.elements.pwd.value, "", "the password is cleared after storing");
 
-  const q = run(page, { "/wifi": { status: 400, body: "WiFi name can have at most 32 characters" } });
+  const q = run(page, { "/wifi": { status: 400, body: "The network name can have at most 32 characters." } });
   Object.assign(q.context.document.getElementById("ssid"), { value: "home" });
   await q.context.joinWifi();
   assert.deepStrictEqual(JSON.parse(q.requests[0].options.body), { ssid: "home", pwd: "" }, "open network");
-  assert.strictEqual(q.elements.smsg.textContent, "Not stored: WiFi name can have at most 32 characters");
+  assert.strictEqual(q.elements.smsg.textContent, "Not stored: The network name can have at most 32 characters.");
 }
 
 // The page has its own "Forget network" button, so "Join network" refuses an empty name
