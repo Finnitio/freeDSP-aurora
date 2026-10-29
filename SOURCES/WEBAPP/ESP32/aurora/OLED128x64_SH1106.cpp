@@ -8,6 +8,7 @@
 #include "hwconfig.h"
 #include "config.h"
 #include "OLED128x64_SH1106.h"
+#include "matrix.h"
 
 extern String getCurrentVirtualInputName(void);
 extern String currentPlugInName;
@@ -114,6 +115,8 @@ void OLED128x64_SH1106::drawUI(const char* plugin, const char* ip, const int cur
     u8g2.setFontRefHeightExtendedText();
     u8g2.drawStr(0,  0, plugin);
     u8g2.drawStr(0, 54, ip);
+    if( isMatrixPlugin() )  // the Preset name next to its letter (legacy Plugins: presetNames[] above)
+      u8g2.drawUTF8(45, 43, matrixPresetName(currentPreset).c_str());
 
   }
 

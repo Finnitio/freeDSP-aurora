@@ -54,6 +54,10 @@ MatrixModel* model = NULL;
 SemaphoreHandle_t modelMutex = NULL;  // the model is used by the web task, the worker and loop()
 bool keepStored = false;              // its file failed to load: never overwrite it with defaults
 MasterVolumeSaver* volumeSaver = NULL;  // under modelMutex too: changed on the worker, stored from loop()
+// Preset names of the slots as in their files, for the GET /preset list and the display;
+// the active slot's name comes from the model once a Preset has been loaded. Under modelMutex.
+std::string storedNames[NUMPRESETS];
+bool presetLoaded = false;
 
 const char* const MASTER_VOLUME_FILE = "/mastervol.txt";
 
@@ -120,6 +124,19 @@ void execOps( const std::vector<Op>& ops )
 String presetFile( uint8_t preset )
 {
   return String( matrixPresetFileName( preset ).c_str() );
+}
+
+std::string readPresetFile( uint8_t preset )
+{
+  std::string json;
+  File f = SPIFFS.open( presetFile( preset ), "r" );
+  if( f )
+  {
+    json.resize( f.size() );
+    f.read( (uint8_t*)&json[0], json.size() );
+    f.close();
+  }
+  return json;
 }
 
 void writePresetFile( uint8_t preset, const std::string& json )
@@ -207,6 +224,23 @@ void matrixInit( void )
   model = new MatrixModel( port, matrixMeta.nbus, matrixMeta.nout, matrixMeta.nbiquad, matrixMeta.maxdly );
   masterVolume.val = readMasterVolumeFile();
   volumeSaver = new MasterVolumeSaver( masterVolume.val );
+  for( uint8_t ii = 0; ii < NUMPRESETS; ii++ )  // no lock needed yet: nothing else uses the model
+  {
+    std::string json = readPresetFile( ii );
+    MatrixModel::ParsedPreset file;
+    if( !json.empty() && model->parsePreset( &json[0], file ).empty() )
+      storedNames[ii] = file.name;
+  }
+}
+
+std::string matrixPresetName( uint8_t preset )
+{
+  if( !model || preset >= NUMPRESETS )
+    return "";
+  ModelLock lock;
+  if( presetLoaded && preset == model->preset() )
+    return model->presetName();
+  return storedNames[preset];
 }
 
 void matrixMasterVolumeChanged( void )
@@ -262,14 +296,7 @@ void matrixLoadPreset( void )
   if( !model )
     return;
 
-  std::string json;
-  File f = SPIFFS.open( presetFile( currentPreset ), "r" );
-  if( f )
-  {
-    json.resize( f.size() );
-    f.read( (uint8_t*)&json[0], json.size() );
-    f.close();
-  }
+  std::string json = readPresetFile( currentPreset );
   // parsed before the lock (it does not touch the model), in place: json is not needed after
   MatrixModel::ParsedPreset file;
   const std::string err = json.empty() ? "no preset file" : model->parsePreset( &json[0], file );
@@ -283,6 +310,8 @@ void matrixLoadPreset( void )
   {
     ModelLock lock;
     oldPreset = model->preset();
+    if( presetLoaded && !keepStored )  // its name as it is (or is about to be) in its file
+      storedNames[oldPreset] = model->presetName();
     if( model->dirty() && !keepStored )
     {
       oldJson = model->savePreset();
@@ -301,6 +330,7 @@ void matrixLoadPreset( void )
       keepStored = !json.empty();  // an existing file stays as it is; edits are not autosaved
     }
     model->setPreset( currentPreset );
+    presetLoaded = true;
     ops.swap( port.ops );
   }
   if( !oldJson.empty() )

@@ -143,6 +143,9 @@ public:
   void setPreset( int preset ) { preset_ = preset; }
   int preset( void ) const { return preset_; }
 
+  /*! Preset name of the active Preset ("" = none), as in stateJson "presetname". */
+  const std::string& presetName( void ) const { return name_; }
+
   /*! Reverts the last accepted apply() (model only, not the DSP writes), e.g. when
    *  the writes could not be queued. A second call does nothing. */
   void undo( void );

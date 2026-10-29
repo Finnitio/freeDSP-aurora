@@ -8,6 +8,7 @@
 #include "hwconfig.h"
 #include "config.h"
 #include "OLED128x64_SSD1309.h"
+#include "matrix.h"
 
 extern String getCurrentVirtualInputName(void);
 extern String currentPlugInName;
@@ -116,6 +117,8 @@ void OLED128x64_SSD1309::drawUI(const char* plugin, const char* ip, const int cu
     u8g2_ssd1309.setFontRefHeightExtendedText();
     u8g2_ssd1309.drawStr(0,  0, plugin);
     u8g2_ssd1309.drawStr(0, 54, ip);
+    if( isMatrixPlugin() )  // the Preset name next to its letter (legacy Plugins: presetNames[] above)
+      u8g2_ssd1309.drawUTF8(45, 43, matrixPresetName(currentPreset).c_str());
 
   }
   u8g2_ssd1309.sendBuffer();

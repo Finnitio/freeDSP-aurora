@@ -30,4 +30,19 @@ void presetSlotsJson( JsonVariant root, int pre, Exists exists )
     used.add( (bool)exists( matrixPresetFileName( ii ) ) );
 }
 
+/*! The same for the matrix Plugin, plus "names": the Preset name of each slot
+ *  ("" = none). name( uint8_t slot ) returns it as a std::string.
+ */
+template <class Exists, class Name>
+void presetSlotsJson( JsonVariant root, int pre, Exists exists, Name name )
+{
+  presetSlotsJson( root, pre, exists );
+  JsonArray names = root.createNestedArray( "names" );
+  for( uint8_t ii = 0; ii < NUMPRESETS; ii++ )
+  {
+    std::string n = name( ii );
+    names.add( &n[0] );  // char*: ArduinoJson copies it (no std::string support on the ESP32)
+  }
+}
+
 #endif

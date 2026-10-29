@@ -62,6 +62,11 @@ MatrixEditResult matrixSetAddOn( uint8_t addr, uint8_t reg, uint8_t data );
 
 std::string matrixState( void );
 
+/*! Preset name of slot `preset` (0-based, "" = none): the active Preset's from the model
+ *  (renames not yet Autosaved included), the others' as read from their files at boot or
+ *  left behind by a switch. "" if this is not a matrix Plugin. Takes the model lock. */
+std::string matrixPresetName( uint8_t preset );
+
 /*! Active biquad coefficients of one Channel (ch "bus" or "out") for the plot; "" if unknown. */
 std::string matrixCoeffs( const char* ch, int idx );
 
