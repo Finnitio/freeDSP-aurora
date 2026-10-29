@@ -133,6 +133,7 @@ async function main() {
   await commitTests();
   await switchTests();
   await exportImportTests();
+  await filterFileTests();
   await presetUsedTests();
   await presetNameTests();
   await presetTestTests();
@@ -555,6 +556,112 @@ async function exportImportTests() {
   await settle();
   assert.deepStrictEqual(sent, []);
   assert(/^Import failed/.test(els.msg.textContent), "an unreadable file is reported");
+}
+
+// ---- Filter file import: the filter dialog sends the file text for its Channel; the firmware
+// answers with the new state or the errors with their line numbers.
+async function filterFileTests() {
+  const flt = header.match(/<div id="flt"[\s\S]*?\n<\/div>\n/);
+  assert(/<input\b[^>]*type="file"[^>]*onchange="importFilterFile\(this\)"/.test(flt[0]),
+    "the filter dialog offers Import of a filter file");
+  const sent = [];
+  let held = null, loads = 0;
+  const res = (ok, status, text) => ({ ok, status, text: () => Promise.resolve(text), json: () => Promise.resolve(JSON.parse(text)) });
+  context.fetch = (url, options) => {
+    if (url.startsWith("/matrix/filterfile")) {
+      sent.push({ url, method: options.method, body: options.body });
+      return new Promise((r) => { held = r; });
+    }
+    if (options && options.method == "POST") {
+      sent.push({ url, body: JSON.parse(options.body) });
+      return Promise.resolve(res(true, 200, JSON.stringify(context.st)));
+    }
+    if (url == "/matrix") loads++;
+    return Promise.resolve(res(true, 200, JSON.stringify(url == "/matrix" ? sample() : { pre: 2, used: [], vol: -20 })));
+  };
+  const settle = async () => { for (let i = 0; i < 10; i++) await flush(); };
+  context.document.activeElement = null;
+  context.st = sample();
+  context.activePreset = 2;
+  context.openF("out", 0);
+  const file = "# Aurora filter file v1\nPEQ 1000 0.7 -3\n";
+
+  // The file text goes to the open Channel of the active Preset; edits wait for the reply.
+  context.importFilter(file);
+  assert.deepStrictEqual(sent, [{ url: "/matrix/filterfile?ch=out&idx=0&preset=2", method: "POST", body: file }]);
+  sent.length = 0;
+  context.send("out", 0, { mute: true });
+  assert.deepStrictEqual(sent, [], "no edit is sent while the filter file is applied");
+  const imported = sample();
+  imported.outs[0].gain = -3;
+  held(res(true, 200, JSON.stringify(imported)));
+  await settle();
+  assert.strictEqual(input("tgout0").value, "-3", "the dialog shows the imported Channel");
+  assert.strictEqual(els.msg.textContent, "Filter file imported");
+  assert.strictEqual(els.ferr.innerHTML, "");
+  context.send("out", 0, { mute: true });
+  await settle();
+  assert.strictEqual(sent.length, 1, "edits resume after the import");
+  sent.length = 0;
+
+  // A rejected file: every error is listed (escaped), the Channel stays as shown.
+  context.importFilter("x");
+  held(res(false, 400, JSON.stringify({ errors: ["line 3: a Bus has no delay", 'line 5: unknown line "<b>"'] })));
+  await settle();
+  assert.strictEqual(els.msg.textContent, "Filter file rejected");
+  assert.strictEqual(els.ferr.innerHTML,
+    "<li>line 3: a Bus has no delay</li><li>line 5: unknown line &quot;&lt;b>&quot;</li>");
+  assert.strictEqual(input("tgout0").value, "-3", "a rejected file keeps the shown Channel");
+  sent.length = 0;
+  context.send("out", 0, { mute: true });
+  await settle();
+  assert.strictEqual(sent.length, 1, "edits resume after a rejected file");
+  sent.length = 0;
+
+  // A Preset conflict lists the reason and reloads the state.
+  loads = 0;
+  context.importFilter("x");
+  held(res(false, 409, JSON.stringify({ errors: ["Preset changed"] })));
+  await settle();
+  assert.strictEqual(els.ferr.innerHTML, "<li>Preset changed</li>");
+  assert.strictEqual(loads, 1, "a conflict reloads the state");
+
+  // A reply that is not the expected JSON is reported and does not lock the page.
+  context.importFilter("x");
+  held(res(false, 500, "<html>oops</html>"));
+  await settle();
+  assert(/^Import failed/.test(els.msg.textContent), els.msg.textContent);
+  sent.length = 0;
+  context.send("out", 0, { mute: true });
+  await settle();
+  assert.strictEqual(sent.length, 1, "edits resume after an unreadable reply");
+  sent.length = 0;
+
+  // The file picker hands the chosen file's text over and is cleared for the next one.
+  const picker = { files: [{ text: () => Promise.resolve(file) }], value: "C:\\fakepath\\f.txt" };
+  context.importFilterFile(picker);
+  await settle();
+  assert.deepStrictEqual(sent.map((x) => x.url), ["/matrix/filterfile?ch=out&idx=0&preset=2"]);
+  assert.strictEqual(picker.value, "");
+  held(res(true, 200, JSON.stringify(sample())));
+  await settle();
+  sent.length = 0;
+
+  // The errors belong to the Channel they were reported for.
+  context.importFilter("x");
+  held(res(false, 400, JSON.stringify({ errors: ["line 1: bad"] })));
+  await settle();
+  context.closeF();
+  context.openF("bus", 0);
+  assert.strictEqual(els.ferr.innerHTML, "", "another Channel starts without the old errors");
+  sent.length = 0;
+
+  // Blocked during a Preset test, like every other edit.
+  context.ab = { pre: [0, 1] };
+  context.importFilter(file);
+  assert.deepStrictEqual(sent, [], "no filter file import during a Preset test");
+  context.ab = null;
+  context.closeF();
 }
 
 // ---- GET /preset says which slots have a Preset file; load() keeps it for the Preset test.

@@ -22,6 +22,7 @@ input.num{flex:0 0 76px;width:76px;height:30px;text-align:right}
 button.mute{width:56px;height:30px;border-top-width:1px}
 button.on{background-color:#802020}
 #msg{color:#e08080;min-height:18px}
+#ferr{color:#e08080;padding-left:18px;overflow-wrap:anywhere}
 #presets button{width:44px;height:30px;border-top-width:1px}
 .file{display:inline-block;box-sizing:border-box;height:30px;line-height:28px;padding:0 10px;border:1px solid #808080;border-radius:2px;color:#fff;text-decoration:none;cursor:pointer}
 .slot{border:1px solid #606060;border-radius:3px;padding:2px 8px;margin:8px 0}
@@ -73,6 +74,8 @@ button:disabled{opacity:.4}
 <div id="budget"></div>
 <div id="slots"></div>
 <button id="add" class="wide" onclick="addSlot()">+ add</button>
+<div class="row"><label class="file">Import filter file<input type="file" accept=".txt,text/plain" onchange="importFilterFile(this)" hidden></label></div>
+<ul id="ferr"></ul>
 </div>
 <div id="wifi" style="display:none"><div class="box">
 <h2>WiFi network</h2>
@@ -298,11 +301,30 @@ document.addEventListener("focusout",function(){if(late&&!down)setTimeout(draw,0
 
 // ---- filter page
 function chan(){return (view.ch=="bus"?st.buses:st.outs)[view.idx];}
-function openF(ch,i){view={ch:ch,idx:i};cf=null;cseq++;csig="";late=false;  // drop replies for the previous Channel
+function openF(ch,i){view={ch:ch,idx:i};cf=null;cseq++;csig="";late=false;ferr([]);  // drop replies for the previous Channel
   document.getElementById("main").style.display="none";document.getElementById("flt").style.display="";
   drawF();}
 function closeF(){view=null;late=false;
   document.getElementById("main").style.display="";document.getElementById("flt").style.display="none";draw();}
+// Filter file import replaces the open Channel's Filter row. The firmware checks the file and
+// answers with the new state or every error with its line number; edits wait like during an import.
+function importFilterFile(el){
+  var f=el.files&&el.files[0];el.value="";  // the same file can be chosen again
+  if(f)f.text().then(importFilter,function(){say("Import failed: cannot read the file");});
+}
+function ferr(list){document.getElementById("ferr").innerHTML=list.map(function(e){return "<li>"+esc(String(e))+"</li>";}).join("");}
+function importFilter(text){
+  if(editsBlocked()||!view)return;
+  var v=view;switching=true;ferr([]);
+  say("Importing filter file...");
+  fetch("/matrix/filterfile?ch="+v.ch+"&idx="+v.idx+"&preset="+activePreset,{method:"POST",headers:{"Content-Type":"text/plain"},body:text})
+   .then(function(r){return r.text().then(function(t){var d=JSON.parse(t);
+     if(!r.ok){if(view==v)ferr(d.errors);say("Filter file rejected");if(r.status==409)return load();return;}
+     seen=++seq;st=d;activePreset=st.preset;draw();say("Filter file imported");});},
+    function(){say("Import failed: no answer from the DSP");})
+   .catch(function(){say("Import failed: unreadable reply from the DSP");})
+   .then(function(){switching=false;});  // always: a failure above must not lock the page
+}
 function param(i,lbl,key,s){
   return "<div class='row'><span class='lbl'>"+lbl+"</span>"+field("s"+i+key,view.ch,view.idx,i,key,s[key])
    +"<span>"+UNIT[key]+"</span></div>";
