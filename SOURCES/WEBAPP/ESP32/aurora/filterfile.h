@@ -19,7 +19,9 @@
 #define FILTERFILE_TOO_LARGE "file larger than " FILTERFILE_STR( FILTERFILE_MAX_BYTES ) " bytes"
 #define FILTERFILE_MAX_ERRORS 20
 
-enum FilterFileType { FILTERFILE_PEQ, FILTERFILE_LSHELF, FILTERFILE_HSHELF, FILTERFILE_PHASE, FILTERFILE_HP, FILTERFILE_LP };
+/*! In the order of MatrixModel's Slot types, so a Slot type converts by a cast (checked there). */
+enum FilterFileType { FILTERFILE_PEQ, FILTERFILE_HP, FILTERFILE_LP, FILTERFILE_LSHELF, FILTERFILE_HSHELF, FILTERFILE_PHASE,
+                      FILTERFILE_TYPES };
 
 /*! "PEQ", "LSHELF", "HSHELF", "PHASE", "HP" or "LP". */
 const char* filterFileTypeName( FilterFileType type );

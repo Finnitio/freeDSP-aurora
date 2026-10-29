@@ -1061,8 +1061,9 @@ std::string MatrixModel::coeffsJson( const char* ch, int idx ) const
 
 bool MatrixModel::filterRow( const char* ch, int idx, FilterFileRow& row ) const
 {
-  static const FilterFileType types[] = { FILTERFILE_PEQ, FILTERFILE_HP, FILTERFILE_LP, FILTERFILE_LSHELF,
-                                          FILTERFILE_HSHELF, FILTERFILE_PHASE };  // by SlotType
+  static_assert( (int)FILTERFILE_PEQ == SLOT_PEQ && (int)FILTERFILE_HP == SLOT_HP && (int)FILTERFILE_LP == SLOT_LP
+                 && (int)FILTERFILE_LSHELF == SLOT_LSHELF && (int)FILTERFILE_HSHELF == SLOT_HSHELF
+                 && (int)FILTERFILE_PHASE == SLOT_PHASE, "FilterFileType follows SlotType" );
   MatrixChannelKind kind;
   if( !parseChannelKind( ch, kind ) )
     return false;
@@ -1079,7 +1080,7 @@ bool MatrixModel::filterRow( const char* ch, int idx, FilterFileRow& row ) const
   for( size_t i = 0; i < c.slots.size(); i++ )
   {
     const Slot& sl = c.slots[i];
-    FilterFileBlock b = { 0, types[sl.type], sl.lr, sl.order, sl.freq, 0.0, 0.0, 0.0, sl.bypass };
+    FilterFileBlock b = { 0, (FilterFileType)sl.type, sl.lr, sl.order, sl.freq, 0.0, 0.0, 0.0, sl.bypass };
     if( sl.type == SLOT_PEQ || sl.type == SLOT_LSHELF || sl.type == SLOT_HSHELF )
       b.gain = sl.gain;
     if( sl.type == SLOT_PEQ || sl.type == SLOT_PHASE )

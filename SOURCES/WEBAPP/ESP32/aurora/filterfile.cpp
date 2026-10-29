@@ -21,10 +21,13 @@ static const double kChannelGainMin = MATRIX_GAIN_MIN_DB, kChannelGainMax = MATR
 static const double kTolDb = 0.01, kTolDeg = 0.1, kFloorDb = -80.0;
 static const char* const kDesigns = "BW6, BW12, BW18, BW24, BW30, BW36, BW42, BW48, LR12, LR24, LR48";
 
+/*! By FilterFileType: the name in a Filter file and the Slot type in a matrix patch. */
+static const struct { const char* file; const char* patch; } kTypeNames[FILTERFILE_TYPES] = {
+  { "PEQ", "peq" }, { "HP", "hp" }, { "LP", "lp" }, { "LSHELF", "lshelf" }, { "HSHELF", "hshelf" }, { "PHASE", "phase" } };
+
 const char* filterFileTypeName( FilterFileType type )
 {
-  static const char* const names[] = { "PEQ", "LSHELF", "HSHELF", "PHASE", "HP", "LP" };
-  return names[type];
+  return kTypeNames[type].file;
 }
 
 //==============================================================================
@@ -300,7 +303,7 @@ int paramsOf( FilterFileType t, const Param* out[3] )
 
 bool typeFromName( const std::string& s, FilterFileType& t )
 {
-  for( int k = FILTERFILE_PEQ; k <= FILTERFILE_LP; k++ )
+  for( int k = 0; k < FILTERFILE_TYPES; k++ )
     if( s == filterFileTypeName( (FilterFileType)k ) )
     {
       t = (FilterFileType)k;
@@ -753,7 +756,6 @@ size_t filterFilePatchCapacity( const FilterFileRow& row )
 
 bool filterFilePatch( const FilterFileRow& row, bool bus, JsonObject patch )
 {
-  static const char* const types[] = { "peq", "lshelf", "hshelf", "phase", "hp", "lp" };
   if( row.hasName )
     patch["name"] = row.name.c_str();  // by reference: row outlives the patch
   patch["gain"] = row.gain;
@@ -769,7 +771,7 @@ bool filterFilePatch( const FilterFileRow& row, bool bus, JsonObject patch )
   {
     const FilterFileBlock& b = row.blocks[i];
     JsonObject s = slots.createNestedObject();
-    s["type"] = types[b.type];
+    s["type"] = kTypeNames[b.type].patch;
     if( b.type == FILTERFILE_HP || b.type == FILTERFILE_LP )
     {
       s["design"] = b.lr ? "lr" : "bw";
