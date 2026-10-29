@@ -349,15 +349,16 @@ void matrixLoadPreset( void )
   execOps( ops );
 }
 
-MatrixEditResult matrixApply( JsonObject patch, std::string& state )
+/*! Runs one model edit under the lock and posts its DSP writes to the worker. A refused post
+ *  undoes the edit ("busy"). posted() runs under the same lock after a successful post.
+ *  i2cPost() does not block, so the post stays under the lock: a refused post is undone
+ *  before anyone else sees the model, and posts keep the order of the model changes. */
+template<typename Edit, typename Posted>
+static MatrixEditResult editAndPost( Edit edit, Posted posted )
 {
-  if( !model )
-    return { MATRIX_EDIT_BAD_REQUEST, "not a matrix plugin" };
-  // i2cPost() does not block, so the post stays under the lock: a refused post is undone
-  // before anyone else sees the model, and posts keep the order of the model changes.
   ModelLock lock;
   port.ops.clear();
-  MatrixEditResult result = model->apply( patch, millis() );
+  MatrixEditResult result = edit();
   if( !result.ok() )
     return result;
   std::vector<Op> ops;
@@ -367,8 +368,16 @@ MatrixEditResult matrixApply( JsonObject patch, std::string& state )
     model->undo();
     return { MATRIX_EDIT_BUSY, "busy" };
   }
-  state = model->stateJson();  // under the same lock: the reply shows exactly this edit
+  posted();
   return result;
+}
+
+MatrixEditResult matrixApply( JsonObject patch, std::string& state )
+{
+  if( !model )
+    return { MATRIX_EDIT_BAD_REQUEST, "not a matrix plugin" };
+  return editAndPost( [&]() { return model->apply( patch, millis() ); },
+                      [&]() { state = model->stateJson(); } );  // the reply shows exactly this edit
 }
 
 MatrixEditResult matrixImport( char* json, int preset )
@@ -382,20 +391,9 @@ MatrixEditResult matrixImport( char* json, int preset )
     return { MATRIX_EDIT_BAD_REQUEST, reason };
   if( Settings.addonid != ADDON_B )
     file.addOn = MatrixAddOn();  // no SPDIF mux to write the file's config to
-  ModelLock lock;  // as matrixApply(): the post stays under the lock
-  port.ops.clear();
-  MatrixEditResult result = model->importPreset( file, preset, millis() );
-  if( !result.ok() )
-    return result;
-  std::vector<Op> ops;
-  ops.swap( port.ops );
-  if( !ops.empty() && !i2cPost( [ops]() { execOps( ops ); } ) )
-  {
-    model->undo();
-    return { MATRIX_EDIT_BUSY, "busy" };
-  }
-  keepStored = false;  // the active Preset is valid now: Autosave may overwrite its file
-  return result;
+  // keepStored = false: the active Preset is valid now, Autosave may overwrite its file
+  return editAndPost( [&]() { return model->importPreset( file, preset, millis() ); },
+                      [&]() { keepStored = false; } );
 }
 
 MatrixEditResult matrixImportFilterFile( const char* ch, int idx, int preset, const char* text, size_t len,
@@ -412,25 +410,10 @@ MatrixEditResult matrixImportFilterFile( const char* ch, int idx, int preset, co
   FilterFileRow row;
   if( parseFilterFileFor( *model, ch, text, len, row, errors ) != MATRIX_EDIT_OK )
     return { MATRIX_EDIT_BAD_REQUEST, errors.empty() ? "" : errors[0] };
-  ModelLock lock;  // as matrixApply(): the post stays under the lock
-  port.ops.clear();
-  MatrixEditResult result = applyFilterFile( *model, ch, idx, preset, row, millis() );
-  if( result.ok() )
-  {
-    std::vector<Op> ops;
-    ops.swap( port.ops );
-    if( !ops.empty() && !i2cPost( [ops]() { execOps( ops ); } ) )
-    {
-      model->undo();
-      result = { MATRIX_EDIT_BUSY, "busy" };
-    }
-  }
+  const MatrixEditResult result = editAndPost( [&]() { return applyFilterFile( *model, ch, idx, preset, row, millis() ); },
+                                               [&]() { state = model->stateJson(); } );
   if( !result.ok() )
-  {
     errors.assign( 1, result.reason );
-    return result;
-  }
-  state = model->stateJson();
   return result;
 }
 
