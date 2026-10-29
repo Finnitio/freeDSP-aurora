@@ -547,7 +547,7 @@ void Parser::blockLine( int n, const std::vector<Tok>& toks )
 std::vector<std::string> Parser::run( const char* text, size_t len )
 {
   if( len > FILTERFILE_MAX_BYTES )
-    return fatal( format( "file larger than %d bytes", FILTERFILE_MAX_BYTES ) );
+    return fatal( FILTERFILE_TOO_LARGE );
   if( !validUtf8( (const unsigned char*)text, len ) )
     return fatal( "file is not UTF-8" );
   if( len >= 3 && memcmp( text, "\xef\xbb\xbf", 3 ) == 0 )

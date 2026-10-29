@@ -2012,7 +2012,7 @@ void setupWebserver (void)
       {
         if( index == 0 || hadBody )  // answer once
           request->send( 413, "application/json",
-                         filterFileErrorsJson( std::vector<std::string>( 1, "file larger than 16384 bytes" ) ).c_str() );
+                         filterFileErrorsJson( std::vector<std::string>( 1, FILTERFILE_TOO_LARGE ) ).c_str() );
         return;
       }
       if( res == BODY_COMPLETE )
