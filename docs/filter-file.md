@@ -161,3 +161,8 @@ It covers every block type and design at the range limits. Design software shoul
 each entry, within the tolerance above, from its block line. `python aurorafilter.py vectors`
 regenerates the file, and the host tests (`SOURCES/WEBAPP/ESP32/test/run.sh`) fail if it is out
 of date.
+
+`cases.json` holds whole files with the outcome of the check: either the imported row or the list
+of errors, word for word. Aurora's parser must give the same outcome for each, and design software
+can use the rejected ones to see the messages. `python filecases.py > cases.json` regenerates it
+from `filecases.py`, and the host tests fail if it is out of date.
