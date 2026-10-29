@@ -4,6 +4,7 @@
 
 #include "matrixmodel.h"
 #include "AudioFilterFactory.h"
+#include "filterfile.h"  // FilterFileRow only: no link dependency
 
 static std::string toString( const JsonDocument& doc );
 
@@ -1036,6 +1037,35 @@ std::string MatrixModel::coeffsJson( const char* ch, int idx ) const
     at += n;
   }
   return toString( doc );
+}
+
+bool MatrixModel::filterRow( const char* ch, int idx, FilterFileRow& row ) const
+{
+  static const FilterFileType types[] = { FILTERFILE_PEQ, FILTERFILE_HP, FILTERFILE_LP, FILTERFILE_LSHELF,
+                                          FILTERFILE_HSHELF, FILTERFILE_PHASE };  // by SlotType
+  const bool isBus = ( strcmp( ch, "bus" ) == 0 );
+  if( ( !isBus && strcmp( ch, "out" ) != 0 ) || idx < 0 || idx >= ( isBus ? nbus_ : nout_ ) )
+    return false;
+  const Channel& c = isBus ? bus_[idx] : out_[idx];
+  row.hasName = true;
+  row.name = c.name;
+  row.gain = c.gain;
+  row.delay = isBus ? 0 : c.delay;
+  row.inverted = !isBus && c.polarity;
+  row.blocks.clear();
+  for( size_t i = 0; i < c.slots.size(); i++ )
+  {
+    const Slot& sl = c.slots[i];
+    FilterFileBlock b = { 0, types[sl.type], sl.lr, sl.order, sl.freq, 0.0, 0.0, 0.0, sl.bypass };
+    if( sl.type == SLOT_PEQ || sl.type == SLOT_LSHELF || sl.type == SLOT_HSHELF )
+      b.gain = sl.gain;
+    if( sl.type == SLOT_PEQ || sl.type == SLOT_PHASE )
+      b.q = sl.q;
+    if( sl.type == SLOT_LSHELF || sl.type == SLOT_HSHELF )
+      b.s = sl.slope;
+    row.blocks.push_back( b );
+  }
+  return true;
 }
 
 //==============================================================================

@@ -662,6 +662,69 @@ std::vector<std::string> parseFilterFile( const char* text, size_t len, const Fi
   return parser.run( text, len );
 }
 
+//==============================================================================
+// Writing
+
+/*! v in the fewest decimals that read back as v ("30", "-3.3"), %.17g if that needs too many. */
+static std::string shortest( double v )
+{
+  char buf[64];
+  for( int decimals = 0; decimals <= 17; decimals++ )
+  {
+    snprintf( buf, sizeof( buf ), "%.*f", decimals, v );
+    if( strtod( buf, NULL ) == v )
+      return buf;
+  }
+  snprintf( buf, sizeof( buf ), "%.17g", v );
+  return buf;
+}
+
+static bool nameFits( const std::string& name )
+{
+  const char* p = name.data();
+  const Tok t = strip( p, p + name.size() );
+  if( name.empty() || name.size() > (size_t)kNameLen || t.n != name.size()
+      || !validUtf8( (const unsigned char*)p, name.size() ) )
+    return false;
+  for( size_t i = 0; i < name.size(); i++ )
+    if( (unsigned char)p[i] < 32 || p[i] == 127 )
+      return false;
+  return true;
+}
+
+std::string writeFilterFile( const FilterFileRow& row, bool bus )
+{
+  std::string s = "aurora-filter 1\nfs 48000\n";
+  if( row.hasName && nameFits( row.name ) )
+    s += "name " + row.name + "\n";
+  s += "gain " + shortest( row.gain ) + " dB\n";
+  if( !bus )
+  {
+    s += "delay " + shortest( row.delay / ( kFs / 1000.0 ) ) + " ms\n";
+    s += row.inverted ? "polarity inverted\n" : "polarity normal\n";
+  }
+  for( size_t i = 0; i < row.blocks.size(); i++ )
+  {
+    const FilterFileBlock& b = row.blocks[i];
+    s += filterFileTypeName( b.type );
+    if( b.type == FILTERFILE_HP || b.type == FILTERFILE_LP )
+      s += format( " %s%d", b.lr ? "LR" : "BW", 6 * b.order );
+    s += " f=" + shortest( b.f );
+    if( b.type == FILTERFILE_PEQ || b.type == FILTERFILE_LSHELF || b.type == FILTERFILE_HSHELF )
+      s += " gain=" + shortest( b.gain );
+    if( b.type == FILTERFILE_PEQ || b.type == FILTERFILE_PHASE )
+      s += " Q=" + shortest( b.q );
+    if( b.type == FILTERFILE_LSHELF || b.type == FILTERFILE_HSHELF )
+      s += " S=" + shortest( b.s );
+    s += b.bypass ? " bypass\n" : "\n";
+    Biquad secs[4];
+    const int n = referenceSections( b, secs );
+    for( int k = 0; k < n; k++ )
+      s += format( "  %.17g %.17g %.17g %.17g %.17g\n", secs[k].b0, secs[k].b1, secs[k].b2, secs[k].a1, secs[k].a2 );
+  }
+  return s;
+}
+
 std::string filterFileErrorsJson( const std::vector<std::string>& errors )
 {
   DynamicJsonDocument doc( JSON_OBJECT_SIZE( 1 ) + JSON_ARRAY_SIZE( errors.size() ) );

@@ -1,3 +1,5 @@
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "filterimport.h"
@@ -38,4 +40,37 @@ MatrixEditResult applyFilterFile( MatrixModel& model, const char* ch, int idx, i
   if( doc.capacity() == 0 || !filterFilePatch( row, bus, patch ) )
     return { MATRIX_EDIT_BAD_REQUEST, "out of memory" };
   return model.apply( patch, nowMs );
+}
+
+/*! The double of the shortest decimal that reads back as the float v: 0.7f gives 0.7. */
+static double decimal( double v )
+{
+  const float f = (float)v;
+  char buf[32];
+  for( int digits = 1; digits <= 9; digits++ )
+  {
+    snprintf( buf, sizeof( buf ), "%.*g", digits, (double)f );
+    if( strtof( buf, NULL ) == f )
+      break;
+  }
+  return strtod( buf, NULL );
+}
+
+MatrixEditStatus exportFilterFile( const MatrixModel& model, const char* ch, int idx, std::string& text )
+{
+  FilterFileRow row;
+  bool bus;
+  if( !channelKind( ch, bus ) || !model.filterRow( ch, idx, row ) )
+    return MATRIX_EDIT_BAD_REQUEST;
+  row.gain = decimal( row.gain );
+  for( size_t i = 0; i < row.blocks.size(); i++ )
+  {
+    FilterFileBlock& b = row.blocks[i];
+    b.f = decimal( b.f );
+    b.gain = decimal( b.gain );
+    b.q = decimal( b.q );
+    b.s = decimal( b.s );
+  }
+  text = writeFilterFile( row, bus );
+  return MATRIX_EDIT_OK;
 }

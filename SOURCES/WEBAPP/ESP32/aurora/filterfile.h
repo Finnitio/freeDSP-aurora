@@ -56,6 +56,12 @@ struct FilterFileRow
  *  which bounds the work for a large file. */
 std::vector<std::string> parseFilterFile( const char* text, size_t len, const FilterFileLimits& limits, FilterFileRow& row );
 
+/*! The text of row as a Filter file for a Bus (no delay, no polarity) or an Output: every line
+ *  written, the coefficients Aurora computes from the parameters with %.17g, the other numbers in
+ *  the fewest digits that read back as the same double. The name is left out if the file cannot
+ *  carry it (empty, too long, control characters, surrounding blanks, not UTF-8). */
+std::string writeFilterFile( const FilterFileRow& row, bool bus );
+
 /*! {"errors":[...]}, the reply to a rejected import. */
 std::string filterFileErrorsJson( const std::vector<std::string>& errors );
 

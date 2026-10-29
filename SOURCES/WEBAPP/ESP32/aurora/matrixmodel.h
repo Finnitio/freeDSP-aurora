@@ -14,6 +14,8 @@
 
 enum MatrixChannelKind { MATRIX_BUS, MATRIX_OUT };
 
+struct FilterFileRow;  // filterfile.h
+
 /*! Add-on B (SPDIF mux) I2C config of a Preset: one register write. set = false:
  *  unknown / no Add-on B, nothing is written. */
 struct MatrixAddOn
@@ -162,6 +164,11 @@ public:
    *  {"fs":48000,"bq":[[b0,b1,b2,a1,a2],...]}, rounded to the DSP's 8.24 grid;
    *  H(z) = (b0+b1 z^-1+b2 z^-2) / (1-a1 z^-1-a2 z^-2). "" if there is no such Channel. */
   std::string coeffsJson( const char* ch, int idx ) const;
+
+  /*! A Channel's Filter row for the Filter file export: name, the stored gain, delay and
+   *  polarity (whatever their bypass), every Slot with its bypass flag. False if there is no
+   *  such Channel. */
+  bool filterRow( const char* ch, int idx, FilterFileRow& row ) const;
 
   /*! Versioned preset JSON (with the Add-on B config as optional "addon": [addr, reg, data]
    *  when it is set; only importPreset() applies it; and the Preset name as optional "name"

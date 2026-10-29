@@ -22,4 +22,11 @@ MatrixEditStatus parseFilterFileFor( const MatrixModel& model, const char* ch, c
 MatrixEditResult applyFilterFile( MatrixModel& model, const char* ch, int idx, int preset, const FilterFileRow& row,
                                   uint32_t nowMs );
 
+/*! Filter file export: text receives Channel ch ("bus" or "out") idx as a Filter file
+ *  (writeFilterFile()). The model keeps single-precision values; each is written as the shortest
+ *  decimal that reads back as the same float, so an import of text gives the same Channel (apart
+ *  from gain and delay bypass, which an import switches off). Read-only: call under the model
+ *  lock. MATRIX_EDIT_OK, or MATRIX_EDIT_BAD_REQUEST for an unknown Channel. */
+MatrixEditStatus exportFilterFile( const MatrixModel& model, const char* ch, int idx, std::string& text );
+
 #endif
