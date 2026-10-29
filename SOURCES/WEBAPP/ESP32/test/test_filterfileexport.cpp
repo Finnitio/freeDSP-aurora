@@ -1,8 +1,8 @@
-// Host tests for the Filter file export of a matrix Channel (filterimport.cpp): the exported file
+// Host tests for the Filter file export of a matrix Channel (filterfilechannel.cpp): the exported file
 // passes the reference check (SOURCES/filterfile/aurorafilter.py check) and imports back into
 // the same Channel.
 // Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
-// Links: filterimport.cpp filterfile.cpp matrixmodel.cpp AudioFilterFactory.cpp
+// Links: filterfilechannel.cpp filterfile.cpp matrixmodel.cpp AudioFilterFactory.cpp
 // Uses: ArduinoJson
 #include <cassert>
 #include <cstdio>
@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 #include <unistd.h>
-#include "../aurora/filterimport.h"
+#include "../aurora/filterfilechannel.h"
 
 struct NullPort : MatrixPort
 {

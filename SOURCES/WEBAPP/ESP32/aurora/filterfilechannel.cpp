@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "filterimport.h"
+#include "filterfilechannel.h"
 
 MatrixEditStatus parseFilterFileFor( const MatrixModel& model, const char* ch, const char* text, size_t len,
                                      FilterFileRow& row, std::vector<std::string>& errors )

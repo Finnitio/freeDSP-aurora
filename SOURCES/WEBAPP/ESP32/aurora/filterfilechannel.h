@@ -1,5 +1,5 @@
-#ifndef FILTERIMPORT_H_
-#define FILTERIMPORT_H_
+#ifndef FILTERFILECHANNEL_H_
+#define FILTERFILECHANNEL_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -8,8 +8,8 @@
 #include "filterfile.h"
 #include "matrixmodel.h"
 
-/*! Filter file import into one Channel of the matrix model, in two steps so that the costly
- *  check runs outside the model lock. */
+/*! A Filter file and one Channel of the matrix model: the import, in two steps so that the
+ *  costly check runs outside the model lock, and the export. */
 
 /*! Step 1: parses and verifies text against the Channel's limits (ch "bus" or "out": no delay or
  *  polarity on a Bus, the Biquad budget, the Plugin's delay limit). Needs no lock: it reads only

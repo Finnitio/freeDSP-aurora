@@ -1,8 +1,8 @@
-// Host tests for the Filter file import into a matrix Channel (filterimport.cpp): the file
+// Host tests for the Filter file import into a matrix Channel (filterfilechannel.cpp): the file
 // replaces the Filter row as one patch through the model, with the Channel's limits, its Link
 // group and the Preset conflict, and a rejected file changes and writes nothing.
 // Run: SOURCES/WEBAPP/ESP32/test/run.sh (runs all host tests)
-// Links: filterimport.cpp filterfile.cpp matrixmodel.cpp AudioFilterFactory.cpp
+// Links: filterfilechannel.cpp filterfile.cpp matrixmodel.cpp AudioFilterFactory.cpp
 // Uses: ArduinoJson
 #include <cassert>
 #include <cmath>
@@ -11,7 +11,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include "../aurora/filterimport.h"
+#include "../aurora/filterfilechannel.h"
 
 // Counts the DSP writes; what is written is the model's business (test_matrixmodel.cpp).
 struct CountingPort : MatrixPort

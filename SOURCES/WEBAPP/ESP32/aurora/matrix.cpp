@@ -4,7 +4,7 @@
 
 #include "matrix.h"
 #include "matrixmodel.h"
-#include "filterimport.h"
+#include "filterfilechannel.h"
 #include "mastervolume.h"
 #include "adau1452.h"
 #include "i2cworker.h"
