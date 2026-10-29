@@ -9,14 +9,15 @@
 
 #include "filterfile.h"
 #include "AudioFilterFactory.h"
+#include "matrixlimits.h"
 
 // Mirrors parse() of SOURCES/filterfile/aurorafilter.py step by step, so both report the same
 // errors in the same order.
 
-static const double kFs = 48000.0;
+static const double kFs = MATRIX_SAMPLE_RATE;
 static const double kPi = 3.14159265358979323846;
-static const int kNameLen = 16;  // bytes of UTF-8
-static const double kChannelGainMin = -80.0, kChannelGainMax = 12.0;
+static const int kNameLen = MATRIX_NAME_LEN;  // bytes of UTF-8
+static const double kChannelGainMin = MATRIX_GAIN_MIN_DB, kChannelGainMax = MATRIX_GAIN_MAX_DB;
 static const double kTolDb = 0.01, kTolDeg = 0.1, kFloorDb = -80.0;
 static const char* const kDesigns = "BW6, BW12, BW18, BW24, BW30, BW36, BW42, BW48, LR12, LR24, LR48";
 

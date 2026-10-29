@@ -43,13 +43,13 @@ static const char* readAddOn( JsonArray i2c, MatrixAddOn& cfg )
   cfg = { true, v[0], v[1], v[2] };
   return NULL;
 }
-static const float kSampleRate = 48000.0f;
+static const float kSampleRate = MATRIX_SAMPLE_RATE;
 static const float kFreqMin = 20.0f, kFreqMax = 20000.0f;
 static const float kQMin = 0.1f, kQMax = 20.0f;
 static const float kPeqGainMin = -24.0f, kPeqGainMax = 24.0f;
 static const float kSlopeMin = 0.1f, kSlopeMax = 1.0f;
-static const float kGainMin = -80.0f;
-static const float kGainMax = 12.0f;
+static const float kGainMin = MATRIX_GAIN_MIN_DB;
+static const float kGainMax = MATRIX_GAIN_MAX_DB;
 static const int kNumRoutes = 3;  // Bus 1, Bus 2, Bus 1+2
 static const uint32_t kPortAnalog = 0, kPortUsb = 1, kPortExp = 2, kPortSpdif = 4, kPortOut = 5;
 

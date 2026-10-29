@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <ArduinoJson.h>
+#include "matrixlimits.h"
 
 /*! State and rules of the matrix plugin: two Buses (each with a Source), eight
  *  Outputs (each routed to Bus 1, Bus 2 or Bus 1+2), per Channel name, mute and
@@ -65,7 +66,6 @@ struct MatrixCoef
 
 #define MATRIX_MAX_BUS 2
 #define MATRIX_MAX_OUT 8
-#define MATRIX_NAME_LEN 16
 #define MATRIX_OUT_LINKS 4  // Output Link groups A..D
 #define MATRIX_MAX_DELAY_SAMPLES 1920  // 40 ms at 48 kHz
 #define MATRIX_SAVE_DELAY_MS 2000
