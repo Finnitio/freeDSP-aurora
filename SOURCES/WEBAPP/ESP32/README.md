@@ -83,6 +83,15 @@ Before uploading, read [firmware update documentation](../../../DOCUMENTATION/AN
 
 You can now compile and upload new ESP32 firmware.
 
+
+## Trying the Matrix page without a DSP
+
+`mock/matrixmock.py` serves the Matrix page from `aurora/matrixpage.h` and answers its requests with an in-memory matrix, so the page can be tried in a browser without flashing anything. It needs Python 3 only:
+
+    python3 SOURCES/WEBAPP/ESP32/mock/matrixmock.py
+
+Then open http://localhost:8080/. A browser reload picks up edits of `matrixpage.h`. Options: `--nout`, `--nbiquad`, `--maxdly` set the Plugin's size, `--latency 0.5` delays every reply, `--empty` starts without the demo Presets, `--host 0.0.0.0` makes it reachable from a phone. Edits are checked like on the DSP, but nothing reaches a DSP and nothing is stored.
+
 ----
 
 # Alternative method using espmake32 (experimental)
