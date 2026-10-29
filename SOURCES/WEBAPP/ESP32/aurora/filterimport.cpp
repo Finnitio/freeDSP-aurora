@@ -38,15 +38,7 @@ MatrixEditResult applyFilterFile( MatrixModel& model, const char* ch, int idx, i
 /*! The double of the shortest decimal that reads back as the float v: 0.7f gives 0.7. */
 static double decimal( double v )
 {
-  const float f = (float)v;
-  char buf[32];
-  for( int digits = 1; digits <= 9; digits++ )
-  {
-    snprintf( buf, sizeof( buf ), "%.*g", digits, (double)f );
-    if( strtof( buf, NULL ) == f )
-      break;
-  }
-  return strtod( buf, NULL );
+  return strtod( filterFileDecimal( v, true ).c_str(), NULL );
 }
 
 MatrixEditStatus exportFilterFile( const MatrixModel& model, const char* ch, int idx, std::string& text )

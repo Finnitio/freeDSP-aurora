@@ -60,6 +60,10 @@ struct FilterFileRow
  *  which bounds the work for a large file. */
 std::vector<std::string> parseFilterFile( const char* text, size_t len, const FilterFileLimits& limits, FilterFileRow& row );
 
+/*! v in the fewest decimals that read back as v ("30", "-3.3"); singlePrecision: as the float
+ *  (float)v, so 0.7f gives "0.7". %.17g if that needs too many. */
+std::string filterFileDecimal( double v, bool singlePrecision );
+
 /*! The text of row as a Filter file for a Bus (no delay, no polarity) or an Output: every line
  *  written, the coefficients Aurora computes from the parameters with %.17g, the other numbers in
  *  the fewest digits that read back as the same double. The name is left out if the file cannot

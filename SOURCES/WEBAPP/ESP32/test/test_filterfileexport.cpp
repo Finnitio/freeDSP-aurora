@@ -189,8 +189,19 @@ static void unknownChannelsAreBadRequests()
   assert(exportFilterFile(m, "spdif", 0, text) == MATRIX_EDIT_BAD_REQUEST);
 }
 
+static void decimalsAreTheShortestThatReadBack()
+{
+  assert(filterFileDecimal(30.0, false) == "30");
+  assert(filterFileDecimal(-3.3, false) == "-3.3");
+  assert(filterFileDecimal((double)0.7f, true) == "0.7");    // the float 0.7f
+  assert(filterFileDecimal((double)0.7f, false) != "0.7");   // the double of 0.7f is not 0.7
+  assert(strtof(filterFileDecimal((double)0.7f, false).c_str(), NULL) == 0.7f);
+  assert(filterFileDecimal((double)1234.567f, true) == "1234.567");
+}
+
 int main()
 {
+  decimalsAreTheShortestThatReadBack();
   anOutputRoundTrips();
   theFileReadsLikeTheExample();
   aBusRoundTripsWithoutDelayAndPolarity();

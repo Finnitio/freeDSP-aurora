@@ -665,18 +665,23 @@ std::vector<std::string> parseFilterFile( const char* text, size_t len, const Fi
 //==============================================================================
 // Writing
 
-/*! v in the fewest decimals that read back as v ("30", "-3.3"), %.17g if that needs too many. */
-static std::string shortest( double v )
+std::string filterFileDecimal( double v, bool singlePrecision )
 {
+  const float f = (float)v;
   char buf[64];
   for( int decimals = 0; decimals <= 17; decimals++ )
   {
     snprintf( buf, sizeof( buf ), "%.*f", decimals, v );
-    if( strtod( buf, NULL ) == v )
+    if( singlePrecision ? strtof( buf, NULL ) == f : strtod( buf, NULL ) == v )
       return buf;
   }
   snprintf( buf, sizeof( buf ), "%.17g", v );
   return buf;
+}
+
+static std::string shortest( double v )
+{
+  return filterFileDecimal( v, false );
 }
 
 static bool nameFits( const std::string& name )
