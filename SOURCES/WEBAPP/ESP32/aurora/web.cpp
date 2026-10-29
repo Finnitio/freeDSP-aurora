@@ -1940,8 +1940,10 @@ void setupWebserver (void)
   {
     // The matrix page is part of the firmware; the model runs here, only the DSP writes are queued.
     server.on( "/",       HTTP_GET, [](AsyncWebServerRequest *request ) { request->send( 200, "text/html", matrixpage_html ); });
-    // Filter file export of one Channel: ?ch=bus|out&idx=n. Before "/matrix", which would take
-    // every GET below /matrix/.
+    // Every "/matrix/..." route comes before the "/matrix" GET and POST handlers: ESPAsyncWebServer
+    // gives a request to the first matching handler, and "/matrix" also matches "/matrix/<x>"
+    // (test/test_webroutes.py checks the order).
+    // Filter file export of one Channel: ?ch=bus|out&idx=n.
     server.on( "/matrix/filterfile", HTTP_GET, [](AsyncWebServerRequest *request )
     {
       std::string text;
@@ -1957,7 +1959,6 @@ void setupWebserver (void)
                            + String( request->getParam( "idx" )->value().toInt() + 1 ) + ".txt\"" );
       request->send( response );
     });
-    server.on( "/matrix", HTTP_GET, [](AsyncWebServerRequest *request ) { request->send( 200, "application/json", matrixState().c_str() ); });
     server.on( "/matrix/coeffs", HTTP_GET, [](AsyncWebServerRequest *request )
     {
       std::string reply;
@@ -1967,18 +1968,6 @@ void setupWebserver (void)
         request->send( 400, "text/plain", "no such channel" );
       else
         request->send( 200, "application/json", reply.c_str() );
-    });
-    server.on( "/matrix", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
-    {
-      std::shared_ptr<DynamicJsonDocument> doc = readJsonBody( request, data, len, index, total, 1024 );
-      if( !doc )
-        return;
-      std::string state;
-      const MatrixEditResult edit = matrixApply( doc->as<JsonObject>(), state );
-      if( edit.ok() )
-        request->send( 200, "application/json", state.c_str() );
-      else
-        request->send( matrixEditHttpStatus( edit.status ), "text/plain", edit.reason.c_str() );
     });
     // Import of a Preset file into the active Preset (?preset=n: the Preset it was made against).
     server.on( "/matrix/import", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
@@ -2028,6 +2017,19 @@ void setupWebserver (void)
       }
       if( res == BODY_COMPLETE )
         filterFileImport( request, body, total );
+    });
+    server.on( "/matrix", HTTP_GET, [](AsyncWebServerRequest *request ) { request->send( 200, "application/json", matrixState().c_str() ); });
+    server.on( "/matrix", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
+    {
+      std::shared_ptr<DynamicJsonDocument> doc = readJsonBody( request, data, len, index, total, 1024 );
+      if( !doc )
+        return;
+      std::string state;
+      const MatrixEditResult edit = matrixApply( doc->as<JsonObject>(), state );
+      if( edit.ok() )
+        request->send( 200, "application/json", state.c_str() );
+      else
+        request->send( matrixEditHttpStatus( edit.status ), "text/plain", edit.reason.c_str() );
     });
   }
   else if( SPIFFS.exists( "/dsp.html" ) )
