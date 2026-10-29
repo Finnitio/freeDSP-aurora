@@ -74,7 +74,7 @@ button:disabled{opacity:.4}
 <div id="budget"></div>
 <div id="slots"></div>
 <button id="add" class="wide" onclick="addSlot()">+ add</button>
-<div class="row"><a id="fexport" class="file" download>Export filter file</a><label class="file">Import filter file<input type="file" accept=".txt,text/plain" onchange="importFilterFile(this)" hidden></label></div>
+<div class="row"><a id="fexport" class="file" download>Export filter file</a><label class="file">Import filter file<input type="file" onchange="importFilterFile(this)" hidden></label></div>
 <ul id="ferr"></ul>
 </div>
 <div id="wifi" style="display:none"><div class="box">
