@@ -46,23 +46,7 @@ void AudioFilterFactory::makeParametricEQ( float a[], float b[], const float gai
  */
 void AudioFilterFactory::makeLowShelv( float a[], float b[], const float gain, const float fc, const float S, const float fs )
 {
-  float A = pow( 10.0, gain/40.0 );
-  float w0 = 2*pi*fc/fs;
-  float alpha = sin(w0)/2.0 * sqrt( (A + 1.0/A) * (1.0/S - 1.0) + 2.0);
-
-  float a0 = (A + 1.0) + (A - 1.0) * cos(w0) + 2.0 * sqrt(A) * alpha;
-  float a1 = ( -2.0 * ( (A - 1.0) + (A + 1.0) * cos(w0) ) ) / a0;
-  float a2 = ( (A + 1.0) + (A - 1.0) * cos(w0) - 2.0 * sqrt(A) * alpha ) / a0;
-  float b0 = ( A * ( (A + 1.0) - (A - 1.0) * cos(w0) + 2.0 * sqrt(A) * alpha ) ) / a0;
-  float b1 = ( 2.0 * A * ( (A - 1.0) - (A + 1.0) * cos(w0) ) ) / a0;
-  float b2 = ( A * ( (A + 1.0) - (A - 1.0) * cos(w0) - 2.0 * sqrt(A) * alpha ) ) / a0;
-  a0 = 1.0;
-  b[0] = b0;
-  b[1] = b1;
-  b[2] = b2;
-  a[0] = a0;
-  a[1] = (-1.0)*a1;
-  a[2] = (-1.0)*a2;
+  toDsp( lowShelf( fc, gain, S, fs ), a, b );
 }
 
 //==============================================================================
@@ -76,22 +60,7 @@ void AudioFilterFactory::makeLowShelv( float a[], float b[], const float gain, c
  */
 void AudioFilterFactory::makeHighShelv( float a[], float b[], const float gain, const float fc, const float S, const float fs )
 {
-  float A = pow( 10.0, gain/40.0 );
-  float w0 = 2.0*pi*fc/fs;
-  float alpha = sin(w0)/2.0 * sqrt( (A + 1.0/A) * (1.0/S - 1.0) + 2.0 );
-  float a0 = (A + 1.0) - (A - 1.0) * cos(w0) + 2.0 * sqrt(A) * alpha;
-  float a1 = ( 2.0 * ( (A - 1.0) - (A + 1.0) * cos(w0) ) ) / a0;
-  float a2 = ( (A + 1.0) - (A - 1.0) * cos(w0) - 2.0 * sqrt(A) * alpha ) / a0;
-  float b0 = ( A * ( (A + 1.0) + (A - 1.0) * cos(w0) + 2.0 * sqrt(A) * alpha ) ) / a0;
-  float b1 = ( -2.0 * A * ( (A - 1.0) + (A + 1.0) * cos(w0) ) ) / a0;
-  float b2 = ( A * ( (A + 1.0) + (A - 1.0) * cos(w0) - 2.0 * sqrt(A) * alpha ) ) / a0;
-  a0 = 1.0;
-  b[0] = b0;
-  b[1] = b1;
-  b[2] = b2;
-  a[0] = a0;
-  a[1] = (-1.0)*a1;
-  a[2] = (-1.0)*a2;
+  toDsp( highShelf( fc, gain, S, fs ), a, b );
 }
 
 void AudioFilterFactory::makeHighPass( float a[], float b[], const int design, const float fc, const float fs )
@@ -1054,82 +1023,128 @@ void AudioFilterFactory::makeLowPass( float a[], float b[], const int design, co
 
 void AudioFilterFactory::makeAllpass( float a[], float b[], const float fc, const float Q, const float fs )
 {
-  float w0 = 2.0 * pi * fc / fs;
-  float alpha = sin(w0) / (2.0 * Q);
-
-  float a0 = 1.0 + alpha;
-  float b0 = (1.0 - alpha) / a0;
-  float b1 = -2.0 * cos(w0) / a0;
-  float b2 = ( 1.0 + alpha ) / a0;
-  float a1 = ( -2.0 * cos(w0) ) / a0;
-  float a2 = ( 1.0 - alpha ) / a0;
-  a0 = 1.0;
-  b[0] = b0;
-  b[1] = b1;
-  b[2] = b2;
-  a[0] = 1.0;
-  a[1] = (-1.0)*a1;
-  a[2] = (-1.0)*a2;
+  toDsp( phase( fc, Q, fs ), a, b );
 }
 
 //==============================================================================
-/*! 1st-order section by the bilinear transform with prewarping (b2 = a2 = 0). */
-static void firstOrderPass( float a[], float b[], const bool high, const float fc, const float fs )
+// The double path (docs/filter-file.md, Coefficients): RBJ cookbook sections normalized to
+// a0 = 1, rounded to float only in toDsp().
+
+static const double kPi = 3.14159265358979323846;
+
+static AudioFilterFactory::Biquad normalized( double b0, double b1, double b2, double a0, double a1, double a2 )
 {
-  const double K = tan( pi * fc / fs );
-  b[0] = ( high ? 1.0 : K ) / ( 1.0 + K );
-  b[1] = ( high ? -1.0 : K ) / ( 1.0 + K );
-  b[2] = 0.0;
-  a[0] = 1.0;
-  a[1] = ( 1.0 - K ) / ( 1.0 + K );
-  a[2] = 0.0;
+  AudioFilterFactory::Biquad s = { b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0 };
+  return s;
 }
 
-/*! 2nd-order section of quality Q (RBJ cookbook). */
-static void secondOrderPass( float a[], float b[], const bool high, const double Q, const float fc, const float fs )
+AudioFilterFactory::Biquad AudioFilterFactory::peq( const double fc, const double gain, const double Q, const double fs )
 {
-  const double w0 = 2.0 * pi * fc / fs;
+  const double A = pow( 10.0, gain / 40.0 );
+  const double w0 = 2.0 * kPi * fc / fs;
   const double alpha = sin( w0 ) / ( 2.0 * Q );
-  const double a0 = 1.0 + alpha;
-  const double edge = ( high ? 1.0 + cos( w0 ) : 1.0 - cos( w0 ) ) * 0.5;
-  b[0] = edge / a0;
-  b[1] = ( high ? -2.0 * edge : 2.0 * edge ) / a0;
-  b[2] = edge / a0;
-  a[0] = 1.0;
-  a[1] = 2.0 * cos( w0 ) / a0;
-  a[2] = -( 1.0 - alpha ) / a0;
+  const double c = cos( w0 );
+  return normalized( 1.0 + alpha * A, -2.0 * c, 1.0 - alpha * A, 1.0 + alpha / A, -2.0 * c, 1.0 - alpha / A );
+}
+
+AudioFilterFactory::Biquad AudioFilterFactory::lowShelf( const double fc, const double gain, const double S, const double fs )
+{
+  const double A = pow( 10.0, gain / 40.0 );
+  const double w0 = 2.0 * kPi * fc / fs;
+  const double c = cos( w0 );
+  const double alpha = sin( w0 ) / 2.0 * sqrt( ( A + 1.0 / A ) * ( 1.0 / S - 1.0 ) + 2.0 );
+  const double r = 2.0 * sqrt( A ) * alpha;
+  return normalized( A * ( ( A + 1.0 ) - ( A - 1.0 ) * c + r ), 2.0 * A * ( ( A - 1.0 ) - ( A + 1.0 ) * c ),
+                     A * ( ( A + 1.0 ) - ( A - 1.0 ) * c - r ), ( A + 1.0 ) + ( A - 1.0 ) * c + r,
+                     -2.0 * ( ( A - 1.0 ) + ( A + 1.0 ) * c ), ( A + 1.0 ) + ( A - 1.0 ) * c - r );
+}
+
+AudioFilterFactory::Biquad AudioFilterFactory::highShelf( const double fc, const double gain, const double S, const double fs )
+{
+  const double A = pow( 10.0, gain / 40.0 );
+  const double w0 = 2.0 * kPi * fc / fs;
+  const double c = cos( w0 );
+  const double alpha = sin( w0 ) / 2.0 * sqrt( ( A + 1.0 / A ) * ( 1.0 / S - 1.0 ) + 2.0 );
+  const double r = 2.0 * sqrt( A ) * alpha;
+  return normalized( A * ( ( A + 1.0 ) + ( A - 1.0 ) * c + r ), -2.0 * A * ( ( A - 1.0 ) + ( A + 1.0 ) * c ),
+                     A * ( ( A + 1.0 ) + ( A - 1.0 ) * c - r ), ( A + 1.0 ) - ( A - 1.0 ) * c + r,
+                     2.0 * ( ( A - 1.0 ) - ( A + 1.0 ) * c ), ( A + 1.0 ) - ( A - 1.0 ) * c - r );
+}
+
+AudioFilterFactory::Biquad AudioFilterFactory::phase( const double fc, const double Q, const double fs )
+{
+  const double w0 = 2.0 * kPi * fc / fs;
+  const double alpha = sin( w0 ) / ( 2.0 * Q );
+  const double c = cos( w0 );
+  return normalized( 1.0 - alpha, -2.0 * c, 1.0 + alpha, 1.0 + alpha, -2.0 * c, 1.0 - alpha );
+}
+
+/*! 1st-order section by the bilinear transform with prewarping (b2 = a2 = 0). */
+static AudioFilterFactory::Biquad firstOrderPass( const bool high, const double fc, const double fs )
+{
+  const double K = tan( kPi * fc / fs );
+  return normalized( high ? 1.0 : K, high ? -1.0 : K, 0.0, 1.0 + K, K - 1.0, 0.0 );
+}
+
+/*! 2nd-order section of quality q (RBJ cookbook). */
+static AudioFilterFactory::Biquad secondOrderPass( const bool high, const double q, const double fc, const double fs )
+{
+  const double w0 = 2.0 * kPi * fc / fs;
+  const double alpha = sin( w0 ) / ( 2.0 * q );
+  const double c = cos( w0 );
+  const double edge = ( high ? 1.0 + c : 1.0 - c ) * 0.5;
+  return normalized( edge, high ? -2.0 * edge : 2.0 * edge, edge, 1.0 + alpha, -2.0 * c, 1.0 - alpha );
+}
+
+int AudioFilterFactory::butterworth( Biquad out[], const bool high, const int order, const double fc, const double fs )
+{
+  int s = 0;
+  if( order % 2 )
+    out[s++] = firstOrderPass( high, fc, fs );
+  for( int k = order / 2; k >= 1; k-- )  // the pole pairs, lowest Q first
+    out[s++] = secondOrderPass( high, 1.0 / ( 2.0 * sin( kPi * ( 2 * k - 1 ) / ( 2.0 * order ) ) ), fc, fs );
+  return s;
+}
+
+int AudioFilterFactory::linkwitzRiley( Biquad out[], const bool high, const int order, const double fc, const double fs )
+{
+  if( order == 2 )  // (s+w)^2: a single biquad with Q = 0.5
+  {
+    out[0] = secondOrderPass( high, 0.5, fc, fs );
+    return 1;
+  }
+  const int n = butterworth( out, high, order / 2, fc, fs );
+  for( int s = 0; s < n; s++ )  // the same Butterworth twice
+    out[n + s] = out[s];
+  return 2 * n;
+}
+
+void AudioFilterFactory::toDsp( const Biquad& s, float a[], float b[] )
+{
+  b[0] = (float)s.b0;
+  b[1] = (float)s.b1;
+  b[2] = (float)s.b2;
+  a[0] = 1.0f;
+  a[1] = (float)-s.a1;
+  a[2] = (float)-s.a2;
+}
+
+int AudioFilterFactory::toDsp( const Biquad secs[], const int n, float a[], float b[] )
+{
+  for( int s = 0; s < n; s++ )
+    toDsp( secs[s], a + 3 * s, b + 3 * s );
+  return n;
 }
 
 int AudioFilterFactory::makeButterworth( float a[], float b[], const bool high, const int order, const float fc, const float fs )
 {
-  int s = 0;
-  if( order % 2 )
-  {
-    firstOrderPass( a, b, high, fc, fs );
-    s = 1;
-  }
-  for( int k = order / 2; k >= 1; k-- )  // the pole pairs, lowest Q first
-  {
-    secondOrderPass( a + 3 * s, b + 3 * s, high, 1.0 / ( 2.0 * sin( pi * ( 2 * k - 1 ) / ( 2.0 * order ) ) ), fc, fs );
-    s++;
-  }
-  return s;
+  Biquad secs[4];
+  return toDsp( secs, butterworth( secs, high, order, fc, fs ), a, b );
 }
 
 int AudioFilterFactory::makeLinkwitzRiley( float a[], float b[], const bool high, const int order, const float fc, const float fs )
 {
-  if( order == 2 )  // (s+w)^2: a single biquad with Q = 0.5
-  {
-    secondOrderPass( a, b, high, 0.5, fc, fs );
-    return 1;
-  }
-  const int n = makeButterworth( a, b, high, order / 2, fc, fs );
-  for( int s = 0; s < n; s++ )  // the same Butterworth twice
-    for( int k = 0; k < 3; k++ )
-    {
-      a[3 * ( n + s ) + k] = a[3 * s + k];
-      b[3 * ( n + s ) + k] = b[3 * s + k];
-    }
-  return 2 * n;
+  Biquad secs[4];
+  return toDsp( secs, linkwitzRiley( secs, high, order, fc, fs ), a, b );
 }
 

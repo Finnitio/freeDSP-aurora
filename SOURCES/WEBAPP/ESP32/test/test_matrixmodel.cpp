@@ -473,7 +473,7 @@ static void peqCoefficientsMatchTheDesign()
   DynamicJsonDocument c = coeffsOf(m, "out", 1);
   assert(c["bq"].size() == 1);
   // reference: RBJ cookbook peaking EQ, f0 = 1 kHz, Q = 1, +6 dB, fs = 48 kHz
-  // (a1/a2 negated for the DSP); tolerance covers the DSP's bandwidth warping
+  // (a1/a2 negated for the DSP), rounded to 4 decimals
   const double ref[5] = { 1.0440, -1.8953, 0.8677, 1.8953, -0.9117 };
   for (int i = 0; i < 5; i++)
     assert(std::fabs(c["bq"][0][i].as<double>() - ref[i]) < 3e-3);
@@ -628,6 +628,43 @@ static std::string addSlot(MatrixModel& m, const std::string& body, const char* 
 static std::string setSlot(MatrixModel& m, int i, const std::string& body, const char* ch = "out", int idx = 1)
 {
   return patch(m, slotPatch(ch, idx, "\"op\":\"set\",\"i\":" + std::to_string(i) + "," + body).c_str());
+}
+
+// The Slots send the Filter file coefficients (SOURCES/filterfile/vectors.json), computed in
+// double and rounded to float only on the way to the DSP (a1/a2 negated).
+static void slotsSendTheFilterFileCoefficientsRoundedToFloat()
+{
+  struct Case
+  {
+    const char* slot;
+    int n;
+    double rbj[4][5];  // b0 b1 b2 a1 a2 per section, from vectors.json
+  };
+  const Case cases[] = {
+    { "\"freq\":10000,\"gain\":6,\"q\":2",  // PEQ f=10000 gain=6 Q=2: cookbook Q, not the bandwidth form
+      1,
+      { { 1.1453050982585622, -0.442064593220008, 0.5627013316581463, -0.442064593220008, 0.7080064299167086 } } },
+    { "\"type\":\"hp\",\"design\":\"lr\",\"order\":8,\"freq\":20",  // HP LR48 f=20
+      4,
+      { { 0.9975854184988755, -1.995170836997751, 0.9975854184988755, -1.9951674183225134, 0.9951742556729882 },
+        { 0.9989974292265931, -1.9979948584531861, 0.9989974292265931, -1.9979914349390586, 0.9979982819673134 },
+        { 0.9975854184988755, -1.995170836997751, 0.9975854184988755, -1.9951674183225134, 0.9951742556729882 },
+        { 0.9989974292265931, -1.9979948584531861, 0.9989974292265931, -1.9979914349390586, 0.9979982819673134 } } },
+  };
+  for (const Case& k : cases)
+  {
+    FakePort port;
+    MatrixModel m(port, 2, 8, 4);
+    assert(addSlot(m, k.slot).empty());
+    assert((int)port.bq.size() == k.n);
+    for (int s = 0; s < k.n; s++)
+    {
+      const FakePort::Bq& q = port.bq[s];
+      const double* r = k.rbj[s];
+      assert(q.b[0] == (float)r[0] && q.b[1] == (float)r[1] && q.b[2] == (float)r[2]);
+      assert(q.a[0] == 1.0f && q.a[1] == (float)-r[3] && q.a[2] == (float)-r[4]);
+    }
+  }
 }
 
 static void slotCostPerTypeAndOrder()
@@ -2246,6 +2283,7 @@ int main()
   polarityDelayAndBypassRoundTripThroughPresets();
   addPeqWritesItsBiquad();
   peqCoefficientsMatchTheDesign();
+  slotsSendTheFilterFileCoefficientsRoundedToFloat();
   budgetRejectsAndAddDisabled();
   slotValuesAreValidated();
   editWritesOnlyTheChangedBiquad();

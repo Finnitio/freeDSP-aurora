@@ -247,23 +247,27 @@ int MatrixModel::used( const Channel& c )
   return n;
 }
 
-/*! The biquads of one Slot (cost() of them, at most 4). */
+/*! The biquads of one Slot (cost() of them, at most 4): the Filter file formulas in double,
+ *  rounded to float here (docs/filter-file.md). */
 int MatrixModel::slotCoefs( const Slot& s, Coef* out )
 {
-  float a[12], b[12];
+  typedef AudioFilterFactory F;
+  F::Biquad secs[4];
   int n = 1;
   switch( s.type )
   {
-  case SLOT_PEQ:    AudioFilterFactory::makeParametricEQ( a, b, s.gain, s.freq, s.q, kSampleRate ); break;
-  case SLOT_LSHELF: AudioFilterFactory::makeLowShelv( a, b, s.gain, s.freq, s.slope, kSampleRate ); break;
-  case SLOT_HSHELF: AudioFilterFactory::makeHighShelv( a, b, s.gain, s.freq, s.slope, kSampleRate ); break;
-  case SLOT_PHASE:  AudioFilterFactory::makeAllpass( a, b, s.freq, s.q, kSampleRate ); break;
+  case SLOT_PEQ:    secs[0] = F::peq( s.freq, s.gain, s.q, kSampleRate ); break;
+  case SLOT_LSHELF: secs[0] = F::lowShelf( s.freq, s.gain, s.slope, kSampleRate ); break;
+  case SLOT_HSHELF: secs[0] = F::highShelf( s.freq, s.gain, s.slope, kSampleRate ); break;
+  case SLOT_PHASE:  secs[0] = F::phase( s.freq, s.q, kSampleRate ); break;
   case SLOT_HP:
   case SLOT_LP:
-    n = s.lr ? AudioFilterFactory::makeLinkwitzRiley( a, b, s.type == SLOT_HP, s.order, s.freq, kSampleRate )
-             : AudioFilterFactory::makeButterworth( a, b, s.type == SLOT_HP, s.order, s.freq, kSampleRate );
+    n = s.lr ? F::linkwitzRiley( secs, s.type == SLOT_HP, s.order, s.freq, kSampleRate )
+             : F::butterworth( secs, s.type == SLOT_HP, s.order, s.freq, kSampleRate );
     break;
   }
+  float a[12], b[12];
+  F::toDsp( secs, n, a, b );
   for( int k = 0; k < n; k++ )
     for( int j = 0; j < 3; j++ )
     {
