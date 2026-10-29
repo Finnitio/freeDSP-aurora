@@ -134,6 +134,7 @@ async function main() {
   await switchTests();
   await exportImportTests();
   await presetUsedTests();
+  await presetNameTests();
   await presetTestTests();
   evaluationTests();
   console.log("matrix page tests passed");
@@ -570,6 +571,63 @@ async function presetUsedTests() {
     "load() stores which Preset slots have a file");
 }
 
+// ---- Preset names: the A-D buttons keep their letters, the active Preset's name sits in a
+// field next to the row and is committed like a Channel name, as a normal edit.
+async function presetNameTests() {
+  const sent = [];
+  const state = sample();
+  state.preset = 1;
+  state.presetname = "Movie night";
+  const res = (text) => ({ ok: true, status: 200, text: () => Promise.resolve(text), json: () => Promise.resolve(JSON.parse(text)) });
+  context.fetch = (url, options) => {
+    if (options && options.method == "POST") {
+      const body = JSON.parse(options.body);
+      sent.push({ url, body });
+      state.presetname = body.name;
+      return Promise.resolve(res(JSON.stringify(state)));
+    }
+    if (url == "/preset") return Promise.resolve(res(JSON.stringify({ pre: 1, used: [true, true, false, true], names: ["", "Movie night", "", "Music"] })));
+    if (url == "/matrix") return Promise.resolve(res(JSON.stringify(state)));
+    return Promise.resolve(res(JSON.stringify({ vol: -20 })));
+  };
+  context.document.activeElement = null;
+  await context.load();
+  for (let i = 0; i < 10; i++) await flush();
+  assert.deepStrictEqual(buttons("presets").map((b) => b.text), ["A", "B", "C", "D"], "the buttons show letters only");
+  assert.deepStrictEqual(buttons("presets").filter((b) => b.on).map((b) => b.text), ["B"]);
+  const field = () => rendered().find((a) => a.id == "presetname");
+  assert.strictEqual(field().value, "Movie night", "the active Preset's name sits next to the row");
+  assert.strictEqual(field().maxlength, "16");
+  assert.deepStrictEqual(Array.from(context.presetNames), ["", "Movie night", "", "Music"],
+    "load() stores the names of all slots for the Evaluation");
+
+  // Commit (change: Enter or leaving the field) sends one edit against the active Preset.
+  handler(field().onchange).call({ value: "Kino" });
+  for (let i = 0; i < 10; i++) await flush();
+  assert.deepStrictEqual(sent, [{ url: "/matrix", body: { ch: "preset", preset: 1, name: "Kino" } }],
+    "a rename is a normal edit of the active Preset, not a Preset switch");
+  assert.strictEqual(field().value, "Kino", "the field shows the name the firmware reports");
+  assert.strictEqual(context.presetNames[1], "Kino", "the Evaluation gets the new name");
+
+  // A reply landing while the field is being typed in does not overwrite it.
+  context.document.activeElement = { id: "presetname", tagName: "INPUT", closest: () => null };
+  state.presetname = "Other";
+  context.st = state;
+  context.draw();
+  assert.strictEqual(field().value, "Kino", "no rebuild under the typing user");
+  context.document.activeElement = null;
+  context.draw();
+  assert.strictEqual(field().value, "Other");
+
+  // An unnamed Preset shows an empty field; a quote in a name stays inside the value.
+  state.presetname = "";
+  context.draw();
+  assert.strictEqual(field().value, "");
+  state.presetname = 'Say "hi"';
+  context.draw();
+  assert(/value="Say &quot;hi&quot;"/.test(element("pname").innerHTML), element("pname").innerHTML);
+}
+
 // ---- Preset test ("A/B test"): setup, blind Rounds, Votes, lock, switch back.
 // The buttons the page rendered into a holder, clicked as a browser would.
 function buttons(id) {
@@ -733,6 +791,7 @@ async function presetTestTests() {
 // ---- Evaluation of a Preset test: the result panel, read as plain text.
 function evaluationTests() {
   context.abResult = realAbResult;
+  context.presetNames = [];  // unnamed Presets: letters only
   const text = () => element("tres").innerHTML.replace(/<button.*?<\/button>/g, "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").replace(/&lt;/g, "<").trim();
   // One row per Preset: real letter, Votes, share, bar; the winner is marked.
   const rows = () => [...element("tres").innerHTML.matchAll(/<div class='row tr'>(.*?)<\/div>/g)]
@@ -792,6 +851,15 @@ function evaluationTests() {
   assert.strictEqual(element("abt").style.display, "none", "Close hides the Evaluation");
   context.abResult([0, 1], [], 10);
   assert.strictEqual(element("abt").style.display, "none", "no Votes: the overlay stays closed");
+
+  // Named Presets: "letter · name" in the rows and the verdict; an unnamed one keeps its letter.
+  context.presetNames = ["", "Movie", "", "Music <loud>"];
+  context.abResult([1, 2, 3], [2, 2, 2, 0], 4);
+  assert.deepStrictEqual(rows(), ["B · Movie 1 Vote 25%", "C 0 Votes 0%", "D · Music &lt;loud> 3 Votes 75% Winner"],
+    "the Evaluation shows the real names next to the letters");
+  assert(element("tres").innerHTML.includes("Music &lt;loud>"), "names are escaped");
+  assert(/Winner: D · Music <loud>\. /.test(text()), text());
+  context.presetNames = [];
 }
 
 // Evaluation statistics of a Preset test: exact multinomial test against equal liking.

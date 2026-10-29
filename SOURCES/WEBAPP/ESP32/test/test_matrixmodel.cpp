@@ -257,6 +257,107 @@ static void namesAreStoredWithoutDspWrites()
   assert(std::string(st["outs"][4]["name"].as<const char*>()) == "Tweeter L");
 }
 
+// Preset name: a label of the active Preset, set by a patch; a normal Autosaved change.
+static std::string presetNameOf(const MatrixModel& m)
+{
+  DynamicJsonDocument st = stateOf(m);
+  return st["presetname"].as<const char*>() ? st["presetname"].as<const char*>() : "<missing>";
+}
+
+static void renamingThePresetIsAnAutosavedChangeWithoutDspWrites()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  m.setPreset(1);
+  assert(presetNameOf(m) == "");  // empty by default
+  assert(patch(m, "{\"ch\":\"preset\",\"name\":\"Movie night\",\"preset\":1}", 100).empty());
+  assert(presetNameOf(m) == "Movie night");
+  assert(port.w.empty() && port.bq.empty());  // nothing for the DSP
+  assert(m.preset() == 1);                    // not a Preset switch
+  assert(!m.saveDue(100 + MATRIX_SAVE_DELAY_MS - 1));
+  assert(m.saveDue(100 + MATRIX_SAVE_DELAY_MS));
+  m.markSaved();
+  assert(patch(m, "{\"ch\":\"preset\",\"name\":\"Movie night\"}", 5000).empty());
+  assert(!m.dirty());  // the same name again is no change
+  m.undo();
+  assert(presetNameOf(m) == "Movie night");
+  assert(patch(m, "{\"ch\":\"preset\",\"name\":\"\"}", 6000).empty());
+  assert(presetNameOf(m) == "");  // cleared
+  m.undo();
+  assert(presetNameOf(m) == "Movie night");
+}
+
+static void badPresetNamesAreRejected()
+{
+  FakePort port;
+  MatrixModel m(port, 2, 8);
+  assert(patch(m, "{\"ch\":\"preset\",\"name\":\"0123456789abcdef\"}").empty());  // 16 bytes
+  assert(patch(m, "{\"ch\":\"preset\",\"name\":\"0123456789abcdefg\"}") == "name too long");
+  assert(patch(m, "{\"ch\":\"preset\",\"name\":\"Kan\u00e4le 123456789\"}") == "name too long");  // 17 bytes in UTF-8
+  assert(patch(m, "{\"ch\":\"preset\",\"name\":5}") == "name must be a string");
+  assert(patch(m, "{\"ch\":\"preset\"}") == "missing name");
+  assert(patch(m, "{\"ch\":\"preset\",\"name\":\"x\",\"mute\":true}") == "unknown field mute");
+  assert(presetNameOf(m) == "0123456789abcdef");
+  assert(edit(m, "{\"ch\":\"preset\",\"name\":\"x\",\"preset\":3}").status == MATRIX_EDIT_CONFLICT);
+  assert(presetNameOf(m) == "0123456789abcdef");
+}
+
+static void presetNameTravelsWithThePresetFile()
+{
+  FakePort port;
+  MatrixModel a(port, 2, 8);
+  const std::string unnamed = a.savePreset();
+  assert(unnamed.find("\"name\":\"\"") == std::string::npos);  // no name: the file has none
+  patch(a, "{\"ch\":\"preset\",\"name\":\"Kino \\\"laut\\\"\"}");
+  const std::string named = a.savePreset();
+
+  // Restart / Preset switch: the name comes back from the file, with no DSP write of its own.
+  FakePort port2;
+  MatrixModel b(port2, 2, 8);
+  assert(b.switchPreset(named).empty());
+  assert(port2.w.empty() && port2.bq.empty());
+  assert(presetNameOf(b) == "Kino \"laut\"");
+  assert(b.savePreset() == named);
+  assert(!b.dirty());
+
+  // An old Preset file without a name loads with an empty one.
+  assert(b.switchPreset(unnamed).empty());
+  assert(presetNameOf(b) == "");
+  assert(b.switchPreset(named).empty());
+  b.switchToDefaults();
+  assert(presetNameOf(b) == "");  // a slot without a file has no name
+
+  // Export/import: the import takes the file's name and is Autosaved.
+  FakePort port3;
+  MatrixModel c(port3, 2, 8);
+  assert(c.importPreset(named, 0, 10).ok());
+  assert(presetNameOf(c) == "Kino \"laut\"");
+  assert(c.saveDue(10 + MATRIX_SAVE_DELAY_MS));
+  c.undo();
+  assert(presetNameOf(c) == "");
+
+  // parsePreset() reports it without touching the model.
+  std::vector<char> buf(named.begin(), named.end());
+  buf.push_back('\0');
+  MatrixModel::ParsedPreset file;
+  assert(c.parsePreset(buf.data(), file).empty());
+  assert(file.name == "Kino \"laut\"");
+  assert(presetNameOf(c) == "");
+}
+
+static void badPresetNameInAFileIsRejected()
+{
+  FakePort port;
+  MatrixModel a(port, 2, 8);
+  std::string good = a.savePreset();
+  std::string longName = good, notString = good;
+  longName.replace(0, 1, "{\"name\":\"0123456789abcdefg\",");
+  notString.replace(0, 1, "{\"name\":7,");
+  assert(a.loadPreset(longName) == "bad preset name");
+  assert(a.loadPreset(notString) == "bad preset name");
+  assert(a.savePreset() == good);
+}
+
 static void presetRoundTripWritesOnlyTheDifference()
 {
   FakePort port;
@@ -2328,6 +2429,10 @@ int main()
   sourceChangeRampsTheBus();
   invalidPatchesAreRejectedWithoutSideEffects();
   namesAreStoredWithoutDspWrites();
+  renamingThePresetIsAnAutosavedChangeWithoutDspWrites();
+  badPresetNamesAreRejected();
+  presetNameTravelsWithThePresetFile();
+  badPresetNameInAFileIsRejected();
   presetRoundTripWritesOnlyTheDifference();
   badPresetIsRejectedAndKeepsState();
   loadDefaultsResetsAndWritesTheDifference();

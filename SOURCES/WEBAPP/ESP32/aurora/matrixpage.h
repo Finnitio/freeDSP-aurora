@@ -55,7 +55,7 @@ button:disabled{opacity:.4}
 <div class="top"><h1>Aurora DSP</h1><button class="mute" onclick="openWifi()">WiFi</button></div>
 <div id="msg"></div>
 <div id="main">
-<div class="row"><div id="presets" class="row" style="margin:0"></div><a id="export" class="file" href="/preset.param" download>Export</a><label class="file">Import<input type="file" accept=".json,application/json" onchange="importFile(this)" hidden></label><button class="mute" title="A/B test: compare Presets blind" onclick="abOpen()">Test</button></div>
+<div class="row"><div id="presets" class="row" style="margin:0"></div><span id="pname"></span><a id="export" class="file" href="/preset.param" download>Export</a><label class="file">Import<input type="file" accept=".json,application/json" onchange="importFile(this)" hidden></label><button class="mute" title="A/B test: compare Presets blind" onclick="abOpen()">Test</button></div>
 <div class="row"><span class="lbl">Vol</span><input type="range" id="vol" class="gain" min="-80" max="0" step="0.5" value="-60" oninput="sendVol(this.value)"><span class="gv" id="volv"></span></div>
 <h2>Buses</h2>
 <div id="buslinks"></div>
@@ -110,13 +110,14 @@ button:disabled{opacity:.4}
 <script>
 var st=null,seq=0,seen=0,late=false,view=null,cf=null,cseq=0,csig="",ct=0,activePreset=-1;
 var presetUsed=[];  // per Preset slot: has a Preset file (GET /preset "used")
+var presetNames=[];  // per Preset slot: its Preset name, "" = none (GET /preset "names")
 function say(t){document.getElementById("msg").textContent=document.getElementById("tmsg").textContent=t||"";}  // tmsg: the Preset test overlay
 function waitIdle(){return fetch("/idle").then(function(r){return r.text();}).then(function(t){
   if(t=="1")return;return new Promise(function(r){setTimeout(r,100);}).then(waitIdle);});}
 // Settles once the matrix and the master volume have been read (or failed to).
 function load(){
   var n=++seq;
-  fetch("/preset").then(function(r){return r.json();}).then(function(p){presetUsed=p.used||[];drawPresets(p.pre);});
+  fetch("/preset").then(function(r){return r.json();}).then(function(p){presetUsed=p.used||[];presetNames=p.names||[];drawPresets(p.pre);});
   return Promise.all([
    fetch("/matrix").then(function(r){return r.json();}).then(function(s){if(n<seen)return;seen=n;st=s;activePreset=s.preset;draw();})
     .catch(function(){say("Cannot read the matrix");}),
@@ -140,6 +141,18 @@ function presetButtons(on,click,off){
   var h="";for(var i=0;i<4;i++)h+="<button class='"+(on(i)?"on":"")+"'"+(off&&off(i)?" disabled":"")+" onclick='"+click+"("+i+")'>"+"ABCD"[i]+"</button>";
   return h;
 }
+// The active Preset's name next to the row; committed like a Channel name, as a normal edit.
+// Not rebuilt while it is being typed in.
+function drawPresetName(){
+  var a=document.activeElement;
+  presetNames[st.preset]=st.presetname||"";
+  if(a&&a.id=="presetname")return;
+  document.getElementById("pname").innerHTML="<input type='text' class='name' id='presetname' maxlength='16' placeholder='Preset name' value=\""
+   +esc(st.presetname||"")+"\" onchange='sendPresetName(this.value)'>";
+}
+function sendPresetName(v){return post({ch:"preset",name:v,preset:activePreset});}
+// "A" or "A · name": a Preset with its name, where only real names may show (Evaluation).
+function presetLabel(p){return "ABCD"[p]+(presetNames[p]?" \u00b7 "+esc(presetNames[p]):"");}
 function drawPresets(cur){  // during a Preset test no slot is marked: the row is hidden, not removed
   document.getElementById("presets").innerHTML=presetButtons(function(i){return i==cur&&!ab;},"if(!ab)preset");
 }
@@ -257,6 +270,7 @@ function busy(sel){
 function draw(){
   if(!st)return;
   if(view){drawF();return;}
+  drawPresetName();
   var b="",o="";
   st.buses.forEach(function(c,i){
     b+=row("bus",i,c,"<select onchange=\"send('bus',"+i+",{source:parseInt(this.value)})\">"+opts(st.sources,c.source,function(s){return s.v;},function(s){return s.n;})+"</select>");
@@ -486,11 +500,11 @@ function abResult(pre,votes,n){
       h=votes.length<n?"<p>Aborted after "+votes.length+" of "+n+" Rounds.</p>":"";
   pre.forEach(function(p,i){
     var c=t.counts[i],pc=Math.round(t.pct[i]);
-    h+="<div class='row tr'><b class='lbl'>"+"ABCD"[p]+"</b><span class='tv'>"+c+" Vote"+(c==1?"":"s")+"</span><span class='tp'>"+pc+
+    h+="<div class='row tr'><b class='lbl'>"+presetLabel(p)+"</b><span class='tv'>"+c+" Vote"+(c==1?"":"s")+"</span><span class='tp'>"+pc+
        "%</span><span class='tb'><i style='width:"+pc+"%'></i></span><b class='tw'>"+(i==v.winner?"Winner":"")+"</b></div>";
   });
   // p is rounded for display: it carries float noise from the sum.
-  h+="<p>"+(v.winner<0?"No winner: tie for first.":"Winner: "+"ABCD"[pre[v.winner]]+". "+(v.p===null?"Fewer than 3 Votes: no p-value.":
+  h+="<p>"+(v.winner<0?"No winner: tie for first.":"Winner: "+presetLabel(pre[v.winner])+". "+(v.p===null?"Fewer than 3 Votes: no p-value.":
      (v.p<0.001?"p &lt; 0.001":"p = "+(+v.p.toFixed(3)))+": "+(v.sig?"significant.":"not significant, could be chance.")))+"</p>";
   abEl("tres").innerHTML=h+"<div class='row'><button onclick='abClose()'>Close</button><button onclick='abOpen(["+pre+"],"+n+")'>Run again</button></div>";
   abShow("tres");

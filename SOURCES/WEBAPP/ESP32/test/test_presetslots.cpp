@@ -36,6 +36,19 @@ static void onlyMatrixPresetFilesCount()
           "{\"pre\":1,\"used\":[false,false,false,false]}" );
 }
 
+// With the Preset names (matrix Plugin): "names" per slot, "" for an unnamed or empty slot.
+static void presetNamesAreListedPerSlot()
+{
+  DynamicJsonDocument doc( 512 );
+  JsonVariant root = doc.to<JsonVariant>();
+  const char* names[] = { "", "Movie \"night\"", "", "Music" };
+  presetSlotsJson( root, 1, []( const std::string& path ) { return path != "/matrix.003.json"; },
+                   [&]( uint8_t slot ) { return std::string( names[slot] ); } );
+  std::string out;
+  serializeJson( doc, out );
+  assert( out == "{\"pre\":1,\"used\":[true,true,false,true],\"names\":[\"\",\"Movie \\\"night\\\"\",\"\",\"Music\"]}" );
+}
+
 static void fileNamesFollowTheSlot()
 {
   assert( matrixPresetFileName( 0 ) == "/matrix.001.json" );
@@ -48,6 +61,7 @@ int main()
   slotWithFileIsUsed();
   onlyMatrixPresetFilesCount();
   fileNamesFollowTheSlot();
+  presetNamesAreListedPerSlot();
   printf( "test_presetslots: all passed\n" );
   return 0;
 }

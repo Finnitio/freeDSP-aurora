@@ -505,8 +505,11 @@ void handleGetPresetJson( AsyncWebServerRequest* request )
   Serial.println(F("GET /preset"));
   #endif
   AsyncJsonResponse* response = new AsyncJsonResponse();
-  presetSlotsJson( response->getRoot(), currentPreset,
-                   []( const std::string& path ) { return SPIFFS.exists( path.c_str() ); } );
+  auto exists = []( const std::string& path ) { return SPIFFS.exists( path.c_str() ); };
+  if( isMatrixPlugin() )
+    presetSlotsJson( response->getRoot(), currentPreset, exists, matrixPresetName );
+  else
+    presetSlotsJson( response->getRoot(), currentPreset, exists );
   response->setLength();
   request->send(response);
 }

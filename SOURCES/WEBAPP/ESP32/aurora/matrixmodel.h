@@ -120,6 +120,8 @@ public:
    *  or "lr" (order 2, 4, 8), default order 2; shelf slope 0.1-1.
    *  SPDIF out: {"ch":"spdif","sel":code} with the left code of one of the offered pairs (stateJson "spdifopts").
    *  Add-on B config: {"ch":"addon","i2c":[addr, reg, data]} (bytes 0-255); written at once, no ramp.
+   *  Preset name of the active Preset: {"ch":"preset","name":s} (at most MATRIX_NAME_LEN bytes,
+   *  "" = none); no DSP write, Autosaved like any change, stateJson "presetname".
    *  Linked aspects of a Link group: {"linkGroup":"bus"|"A".."D", "mute"|"filters"|"gain"|"delay":bool}
    *  ("bus" is the Buses' Link group, A..D the Outputs'). Buses cannot link delay. A Channel
    *  joining a Link group takes over its linked aspects, so a patch that joins cannot also set them.
@@ -142,6 +144,9 @@ public:
   void setPreset( int preset ) { preset_ = preset; }
   int preset( void ) const { return preset_; }
 
+  /*! Preset name of the active Preset ("" = none), as in stateJson "presetname". */
+  const std::string& presetName( void ) const { return name_; }
+
   /*! A Channel's Biquad budget and the Output delay limit in samples; fixed at construction. */
   int biquads( void ) const { return nbiquad_; }
   int maxDelay( void ) const { return maxDelay_; }
@@ -159,7 +164,8 @@ public:
   std::string coeffsJson( const char* ch, int idx ) const;
 
   /*! Versioned preset JSON (with the Add-on B config as optional "addon": [addr, reg, data]
-   *  when it is set; only importPreset() applies it), and its inverse. loadPreset() returns "" or the reason.
+   *  when it is set; only importPreset() applies it; and the Preset name as optional "name"
+   *  when it is not empty: a file without one loads with ""), and its inverse. loadPreset() returns "" or the reason.
    *  On success it writes only the blocks that differ from the current state (each
    *  biquad, gain, delay, polarity, route, Source, SPDIF out), with no ramp; the gain
    *  write of a Channel in the ramp set (if its gain differs) comes after all other
@@ -225,6 +231,7 @@ private:
   void saveUndo( void );
   std::string applyPatch( JsonObject patch, uint32_t nowMs );
   std::string applyLinkGroup( JsonObject patch, uint32_t nowMs );
+  std::string applyPresetName( JsonObject patch, uint32_t nowMs );
 
   enum SlotType { SLOT_PEQ, SLOT_HP, SLOT_LP, SLOT_LSHELF, SLOT_HSHELF, SLOT_PHASE };
 
@@ -308,6 +315,7 @@ private:
   LinkGroup outLink_[MATRIX_OUT_LINKS];
   uint32_t spdif_;  // left code of the SPDIF out pair
   MatrixAddOn addOn_;
+  std::string name_;  // Preset name, "" = none
   bool dirty_;
   uint32_t lastChange_;
   bool presetSwitching_;
@@ -318,6 +326,7 @@ private:
     bool valid;
     uint32_t spdif;
     MatrixAddOn addOn;
+    std::string name;
     Channel bus[MATRIX_MAX_BUS];
     Channel out[MATRIX_MAX_OUT];
     LinkGroup busLink;
@@ -336,6 +345,7 @@ public:
     LinkGroup outLink[MATRIX_OUT_LINKS];
     uint32_t spdif;
     MatrixAddOn addOn;  // the file's optional "addon"; not set: keep the current config
+    std::string name;   // the file's optional Preset "name"; "" if it has none
   };
 };
 

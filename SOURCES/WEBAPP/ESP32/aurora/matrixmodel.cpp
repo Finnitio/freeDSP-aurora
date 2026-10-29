@@ -426,6 +426,7 @@ MatrixModel::MatrixModel( MatrixPort& port, int nbus, int nout, int nbiquad, int
 void MatrixModel::reset( void )
 {
   spdif_ = spdifPairCode( 0 );
+  name_.clear();
   busLink_ = (LinkGroup){ false, false, false, false };
   for( int g = 0; g < MATRIX_OUT_LINKS; g++ )
     outLink_[g] = (LinkGroup){ false, false, false, false };
@@ -466,6 +467,7 @@ void MatrixModel::saveUndo( void )
   undo_.valid = true;
   undo_.spdif = spdif_;
   undo_.addOn = addOn_;
+  undo_.name = name_;
   undo_.busLink = busLink_;
   for( int g = 0; g < MATRIX_OUT_LINKS; g++ ) undo_.outLink[g] = outLink_[g];
   for( int b = 0; b < nbus_; b++ ) undo_.bus[b] = bus_[b];
@@ -720,6 +722,31 @@ std::string MatrixModel::applyLinkGroup( JsonObject patch, uint32_t nowMs )
   return "";
 }
 
+std::string MatrixModel::applyPresetName( JsonObject patch, uint32_t nowMs )
+{
+  for( JsonPair kv : patch )
+  {
+    const char* key = kv.key().c_str();
+    if( strcmp( key, "ch" ) != 0 && strcmp( key, "name" ) != 0 )
+      return std::string( "unknown field " ) + key;
+  }
+  if( !patch.containsKey( "name" ) )
+    return "missing name";
+  const char* s = patch["name"].as<const char*>();
+  if( !s )
+    return "name must be a string";
+  if( strlen( s ) > MATRIX_NAME_LEN )
+    return "name too long";
+  saveUndo();
+  if( name_ != s )
+  {
+    name_ = s;
+    dirty_ = true;
+    lastChange_ = nowMs;
+  }
+  return "";
+}
+
 std::string MatrixModel::applyPatch( JsonObject patch, uint32_t nowMs )
 {
   if( patch.containsKey( "linkGroup" ) )
@@ -742,6 +769,8 @@ std::string MatrixModel::applyPatch( JsonObject patch, uint32_t nowMs )
     }
     return "";
   }
+  if( strcmp( kind, "preset" ) == 0 )
+    return applyPresetName( patch, nowMs );
   if( strcmp( kind, "addon" ) == 0 )
   {
     MatrixAddOn cfg;
@@ -949,6 +978,7 @@ void MatrixModel::undo( void )
     return;
   spdif_ = undo_.spdif;
   addOn_ = undo_.addOn;
+  name_ = undo_.name;
   busLink_ = undo_.busLink;
   for( int g = 0; g < MATRIX_OUT_LINKS; g++ ) outLink_[g] = undo_.outLink[g];
   for( int b = 0; b < nbus_; b++ ) bus_[b] = undo_.bus[b];
@@ -1069,6 +1099,7 @@ std::string MatrixModel::stateJson( void ) const
 {
   DynamicJsonDocument doc( 20480 + 288 * slotCount() );
   doc["preset"] = preset_;
+  doc["presetname"] = name_.c_str();
   doc["nbus"] = nbus_;
   doc["nout"] = nout_;
   doc["nbiquad"] = nbiquad_;
@@ -1148,6 +1179,8 @@ std::string MatrixModel::savePreset( void ) const
 {
   DynamicJsonDocument doc( 5120 + 256 * slotCount() );
   doc["v"] = kPresetVersion;
+  if( !name_.empty() )
+    doc["name"] = name_.c_str();
   doc["spdif"] = (long)spdif_;
   if( addOn_.set )
   {
@@ -1360,6 +1393,15 @@ std::string MatrixModel::parsePreset( char* json, ParsedPreset& out ) const
   if( (int)buses.size() != nbus_ || (int)outs.size() != nout_ )
     return "preset has the wrong channel count";
 
+  out.name.clear();  // optional: unnamed Presets and those from before Preset names have none
+  if( doc.containsKey( "name" ) )
+  {
+    const char* name = doc["name"].as<const char*>();
+    if( !name || strlen( name ) > MATRIX_NAME_LEN )
+      return "bad preset name";
+    out.name = name;
+  }
+
   out.spdif = spdifPairCode( 0 );  // optional: presets from before the SPDIF out selector have none
   if( doc.containsKey( "spdif" ) )
   {
@@ -1427,6 +1469,7 @@ void MatrixModel::applyParsed( const ParsedPreset& p, MatrixRampSet* ramp, bool 
   busLink_ = p.busLink;
   for( int g = 0; g < MATRIX_OUT_LINKS; g++ ) outLink_[g] = p.outLink[g];
   spdif_ = p.spdif;
+  name_ = p.name;
   undo_.valid = false;
   dirty_ = false;
   writeDiff( before, spdifBefore, ramp, shared, addOn );
