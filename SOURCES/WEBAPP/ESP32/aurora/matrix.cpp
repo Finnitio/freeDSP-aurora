@@ -278,12 +278,16 @@ std::string matrixCoeffs( const char* ch, int idx )
 
 std::string matrixFilterFile( const char* ch, int idx )
 {
-  std::string text;
-  if( !model )
-    return text;
-  ModelLock lock;
-  exportFilterFile( *model, ch, idx, text );
-  return text;
+  MatrixChannelKind kind;
+  if( !model || !parseChannelKind( ch, kind ) )
+    return "";
+  FilterFileRow row;
+  {
+    ModelLock lock;  // only the copy of the row: the formatting runs without the lock
+    if( !model->filterRow( ch, idx, row ) )
+      return "";
+  }
+  return writeExportedFilterFile( row, kind == MATRIX_BUS );
 }
 
 void matrixWriteBaseline( void )

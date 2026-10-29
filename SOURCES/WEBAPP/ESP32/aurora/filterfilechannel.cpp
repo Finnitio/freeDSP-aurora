@@ -41,12 +41,8 @@ static double decimal( double v )
   return strtod( filterFileDecimal( v, true ).c_str(), NULL );
 }
 
-MatrixEditStatus exportFilterFile( const MatrixModel& model, const char* ch, int idx, std::string& text )
+std::string writeExportedFilterFile( FilterFileRow row, bool bus )
 {
-  FilterFileRow row;
-  MatrixChannelKind kind;
-  if( !parseChannelKind( ch, kind ) || !model.filterRow( ch, idx, row ) )
-    return MATRIX_EDIT_BAD_REQUEST;
   row.gain = decimal( row.gain );
   for( size_t i = 0; i < row.blocks.size(); i++ )
   {
@@ -56,6 +52,15 @@ MatrixEditStatus exportFilterFile( const MatrixModel& model, const char* ch, int
     b.q = decimal( b.q );
     b.s = decimal( b.s );
   }
-  text = writeFilterFile( row, kind == MATRIX_BUS );
+  return writeFilterFile( row, bus );
+}
+
+MatrixEditStatus exportFilterFile( const MatrixModel& model, const char* ch, int idx, std::string& text )
+{
+  FilterFileRow row;
+  MatrixChannelKind kind;
+  if( !parseChannelKind( ch, kind ) || !model.filterRow( ch, idx, row ) )
+    return MATRIX_EDIT_BAD_REQUEST;
+  text = writeExportedFilterFile( row, kind == MATRIX_BUS );
   return MATRIX_EDIT_OK;
 }
