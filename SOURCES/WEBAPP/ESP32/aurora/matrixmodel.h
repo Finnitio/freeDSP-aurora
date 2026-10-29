@@ -123,7 +123,8 @@ public:
    *  gainBypass, and on Outputs only polarity (bool), delayUs (rounded to whole samples, max 40 ms)
    *  and delayBypass,
    *  slot: {"op":"add", type, design, order, freq, q, gain, slope} | {"op":"del","i"} | {"op":"set","i", the same, bypass},
-   *  slots: [{type, design, order, freq, q, gain, slope, bypass}, ...] replaces all Slots (Filter file import)}.
+   *  slots: [{type, design, order, freq, q, gain, slope, bypass}, ...] replaces all Slots (Filter file import;
+   *  only the Slot ranges and the Biquad budget are checked here, not the file's coefficients)}.
    *  type: "peq" (default), "hp", "lp", "lshelf", "hshelf", "phase"; HP/LP: design "bw" (order 1-8, default)
    *  or "lr" (order 2, 4, 8), default order 2; shelf slope 0.1-1.
    *  SPDIF out: {"ch":"spdif","sel":code} with the left code of one of the offered pairs (stateJson "spdifopts").

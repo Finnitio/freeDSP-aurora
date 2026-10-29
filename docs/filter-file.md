@@ -29,6 +29,13 @@ calculated.
   Channel's Link group, Autosave stores it, and it conflicts if a Preset switch is in progress.
   There is no undo.
 - The blocks take the Channel's biquads in file order. They must fit the Channel's Biquad budget.
+- `POST /matrix/filterfile?ch=bus|out&idx=n&preset=n` takes the file as the body. Its heap peak
+  is the body (up to 16 KiB, kept until the reply) plus the parsed row plus, one after the
+  other, the patch document (about 150 bytes per block) and the state reply (a 20 KiB JSON
+  document plus 288 bytes per Slot, and its text).
+- The import becomes a `slots` patch for `POST /matrix`. That field replaces a whole Slot list
+  without the Filter file check (only the Slot ranges and the Biquad budget); send files through
+  `/matrix/filterfile`.
 
 ## Export
 
