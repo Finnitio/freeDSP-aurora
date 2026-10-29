@@ -4,6 +4,7 @@
 
 #include "matrix.h"
 #include "matrixmodel.h"
+#include "filterimport.h"
 #include "mastervolume.h"
 #include "adau1452.h"
 #include "i2cworker.h"
@@ -354,6 +355,42 @@ MatrixEditResult matrixImport( char* json, int preset )
     return { MATRIX_EDIT_BUSY, "busy" };
   }
   keepStored = false;  // the active Preset is valid now: Autosave may overwrite its file
+  return result;
+}
+
+MatrixEditResult matrixImportFilterFile( const char* ch, int idx, int preset, const char* text, size_t len,
+                                         std::vector<std::string>& errors, std::string& state )
+{
+  errors.clear();
+  if( !model )
+  {
+    errors.assign( 1, "not a matrix plugin" );
+    return { MATRIX_EDIT_BAD_REQUEST, errors[0] };
+  }
+  // The costly check needs no lock (it reads only the model's fixed limits): the worker and
+  // loop() go on meanwhile.
+  FilterFileRow row;
+  if( parseFilterFileFor( *model, ch, text, len, row, errors ) != MATRIX_EDIT_OK )
+    return { MATRIX_EDIT_BAD_REQUEST, errors.empty() ? "" : errors[0] };
+  ModelLock lock;  // as matrixApply(): the post stays under the lock
+  port.ops.clear();
+  MatrixEditResult result = applyFilterFile( *model, ch, idx, preset, row, millis() );
+  if( result.ok() )
+  {
+    std::vector<Op> ops;
+    ops.swap( port.ops );
+    if( !ops.empty() && !i2cPost( [ops]() { execOps( ops ); } ) )
+    {
+      model->undo();
+      result = { MATRIX_EDIT_BUSY, "busy" };
+    }
+  }
+  if( !result.ok() )
+  {
+    errors.assign( 1, result.reason );
+    return result;
+  }
+  state = model->stateJson();
   return result;
 }
 

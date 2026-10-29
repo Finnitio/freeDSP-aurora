@@ -329,20 +329,27 @@ std::string MatrixModel::applySlot( JsonObject op, Channel& c ) const
   if( !add && strcmp( name, "del" ) != 0 && strcmp( name, "set" ) != 0 )
     return "unknown slot op";
 
-  Slot s = choice( 0 );
   int at = -1;
   if( !add )
   {
     if( !op["i"].is<int>() || op["i"].as<int>() < 0 || op["i"].as<int>() >= (int)c.slots.size() )
       return "no such slot";
     at = op["i"].as<int>();
-    s = c.slots[at];
   }
   if( strcmp( name, "del" ) == 0 )
   {
     c.slots.erase( c.slots.begin() + at );  // the following Slots close the gap
     return "";
   }
+  return editSlot( op, c, at );
+}
+
+/*! The fields of a Slot edit (type, design, order, freq, q, gain, slope, bypass) on Slot at, or on
+ *  a new Slot appended for at = -1; changes only c, and only if it returns "". */
+std::string MatrixModel::editSlot( JsonObject op, Channel& c, int at ) const
+{
+  const bool add = ( at < 0 );
+  Slot s = add ? choice( 0 ) : c.slots[at];
   const struct { const char* key; float* v; } nums[] = {
     { "freq", &s.freq }, { "q", &s.q }, { "gain", &s.gain }, { "slope", &s.slope } };
   for( size_t k = 0; k < 4; k++ )
@@ -843,6 +850,21 @@ std::string MatrixModel::applyPatch( JsonObject patch, uint32_t nowMs )
       std::string err = applySlot( v.as<JsonObject>(), next );
       if( !err.empty() )
         return err;
+      slotChanged = true;
+    }
+    else if( strcmp( key, "slots" ) == 0 )  // the whole list, e.g. from a Filter file
+    {
+      if( !v.is<JsonArray>() )
+        return "slots must be an array";
+      next.slots.clear();
+      for( JsonVariant s : v.as<JsonArray>() )
+      {
+        if( !s.is<JsonObject>() )
+          return "slots must hold objects";
+        std::string err = editSlot( s.as<JsonObject>(), next, -1 );
+        if( !err.empty() )
+          return err;
+      }
       slotChanged = true;
     }
     else if( strcmp( key, "link" ) == 0 )

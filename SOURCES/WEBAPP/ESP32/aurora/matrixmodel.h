@@ -114,7 +114,8 @@ public:
   /*! Applies a patch {"ch":"bus"|"out","idx":n, name, mute, gain, link, source (Bus), route (Output),
    *  gainBypass, and on Outputs only polarity (bool), delayUs (rounded to whole samples, max 40 ms)
    *  and delayBypass,
-   *  slot: {"op":"add", type, design, order, freq, q, gain, slope} | {"op":"del","i"} | {"op":"set","i", the same, bypass}}.
+   *  slot: {"op":"add", type, design, order, freq, q, gain, slope} | {"op":"del","i"} | {"op":"set","i", the same, bypass},
+   *  slots: [{type, design, order, freq, q, gain, slope, bypass}, ...] replaces all Slots (Filter file import)}.
    *  type: "peq" (default), "hp", "lp", "lshelf", "hshelf", "phase"; HP/LP: design "bw" (order 1-8, default)
    *  or "lr" (order 2, 4, 8), default order 2; shelf slope 0.1-1.
    *  SPDIF out: {"ch":"spdif","sel":code} with the left code of one of the offered pairs (stateJson "spdifopts").
@@ -140,6 +141,10 @@ public:
   /*! The Preset the state belongs to; reported by stateJson() and checked by apply(). */
   void setPreset( int preset ) { preset_ = preset; }
   int preset( void ) const { return preset_; }
+
+  /*! A Channel's Biquad budget and the Output delay limit in samples; fixed at construction. */
+  int biquads( void ) const { return nbiquad_; }
+  int maxDelay( void ) const { return maxDelay_; }
 
   /*! Reverts the last accepted apply() (model only, not the DSP writes), e.g. when
    *  the writes could not be queued. A second call does nothing. */
@@ -265,6 +270,7 @@ private:
   static int used( const Channel& c );  // biquads taken by the Slots
   int slotCount( void ) const;
   std::string applySlot( JsonObject op, Channel& c ) const;
+  std::string editSlot( JsonObject op, Channel& c, int at ) const;
   void stages( const Channel& c, std::vector<Coef>& out ) const;
   void writeStages( MatrixChannelKind kind, int idx, const Channel& c, const Channel* prev );
   struct Snapshot

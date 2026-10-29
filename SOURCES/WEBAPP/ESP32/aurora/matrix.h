@@ -2,6 +2,7 @@
 #define MATRIX_H_
 
 #include <string>
+#include <vector>
 #include <ArduinoJson.h>
 #include "matrixmodel.h"
 
@@ -51,6 +52,13 @@ MatrixEditResult matrixApply( JsonObject patch, std::string& state );
  *  the I2C worker, so this is safe in a web handler. json (NUL-terminated) is parsed in
  *  place, outside the model lock, and is changed by the call. */
 MatrixEditResult matrixImport( char* json, int preset );
+
+/*! Filter file import (docs/filter-file.md) into Channel ch ("bus" or "out") idx, made against
+ *  Preset `preset`: replaces its Filter row like one live edit (Link group, Autosave, conflict).
+ *  text (len bytes) is checked outside the model lock. errors receives the file's errors (up to
+ *  20), or the reason of a rejected edit; on success state is the new state. Safe in a web handler. */
+MatrixEditResult matrixImportFilterFile( const char* ch, int idx, int preset, const char* text, size_t len,
+                                         std::vector<std::string>& errors, std::string& state );
 
 /*! Export: the active Preset as a Preset file, including changes Autosave has not stored yet. */
 std::string matrixPresetJson( void );

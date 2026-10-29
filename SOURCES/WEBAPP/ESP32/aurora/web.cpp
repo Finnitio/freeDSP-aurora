@@ -27,6 +27,7 @@
 #include "apconfig.h"
 #include "matrix.h"
 #include "matrixpage.h"
+#include "filterfile.h"
 #include "mastervolume.h"
 
 #if HAVE_DISPLAY
@@ -1908,6 +1909,28 @@ static void postJson( AsyncWebServerRequest* request, uint8_t* data, size_t len,
     request->send( 200, "text/plain", "" );
 }
 
+/*! Answers POST /matrix/filterfile: 200 with the new matrix state, else {"errors":[...]} with
+ *  400 (bad file or request), 409 (Preset conflict) or 503 (busy). */
+static void filterFileImport( AsyncWebServerRequest* request, const char* text, size_t len )
+{
+  std::vector<std::string> errors;
+  if( !request->hasParam( "ch" ) || !request->hasParam( "idx" ) || !request->hasParam( "preset" ) )
+  {
+    errors.push_back( "missing ch, idx or preset" );
+    request->send( 400, "application/json", filterFileErrorsJson( errors ).c_str() );
+    return;
+  }
+  std::string state;
+  const MatrixEditResult edit = matrixImportFilterFile( request->getParam( "ch" )->value().c_str(),
+                                                        request->getParam( "idx" )->value().toInt(),
+                                                        request->getParam( "preset" )->value().toInt(),
+                                                        text, len, errors, state );
+  if( edit.ok() )
+    request->send( 200, "application/json", state.c_str() );
+  else
+    request->send( matrixEditHttpStatus( edit.status ), "application/json", filterFileErrorsJson( errors ).c_str() );
+}
+
 void setupWebserver (void)
 {
   if( isMatrixPlugin() )
@@ -1963,6 +1986,28 @@ void setupWebserver (void)
         request->send( 200, "application/json", matrixState().c_str() );
       else
         request->send( matrixEditHttpStatus( edit.status ), "text/plain", edit.reason.c_str() );
+    });
+    // Filter file import into one Channel: ?ch=bus|out&idx=n&preset=n, the file text as the body.
+    // An empty body never reaches the body handler, so the request handler answers it.
+    server.on( "/matrix/filterfile", HTTP_POST, [](AsyncWebServerRequest *request)
+    {
+      if( request->contentLength() == 0 )
+        filterFileImport( request, "", 0 );
+    }, NULL, [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
+    {
+      char* body = (char*)request->_tempObject;  // freed by the request
+      const bool hadBody = ( body != NULL );
+      BodyResult res = bodyChunk( body, data, len, index, total, FILTERFILE_MAX_BYTES );
+      request->_tempObject = body;
+      if( res == BODY_REJECTED )
+      {
+        if( index == 0 || hadBody )  // answer once
+          request->send( 413, "application/json",
+                         filterFileErrorsJson( std::vector<std::string>( 1, "file larger than 16384 bytes" ) ).c_str() );
+        return;
+      }
+      if( res == BODY_COMPLETE )
+        filterFileImport( request, body, total );
     });
   }
   else if( SPIFFS.exists( "/dsp.html" ) )
