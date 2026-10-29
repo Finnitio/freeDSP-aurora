@@ -4,24 +4,16 @@
 
 #include "filterimport.h"
 
-static bool channelKind( const char* ch, bool& bus )
-{
-  if( !ch )
-    return false;
-  bus = strcmp( ch, "bus" ) == 0;
-  return bus || strcmp( ch, "out" ) == 0;
-}
-
 MatrixEditStatus parseFilterFileFor( const MatrixModel& model, const char* ch, const char* text, size_t len,
                                      FilterFileRow& row, std::vector<std::string>& errors )
 {
-  bool bus;
-  if( !channelKind( ch, bus ) )
+  MatrixChannelKind kind;
+  if( !parseChannelKind( ch, kind ) )
   {
     errors.assign( 1, "unknown channel kind" );
     return MATRIX_EDIT_BAD_REQUEST;
   }
-  FilterFileLimits limits = { bus, model.biquads(), model.maxDelay() };
+  FilterFileLimits limits = { kind == MATRIX_BUS, model.biquads(), model.maxDelay() };
   errors = parseFilterFile( text, len, limits, row );
   return errors.empty() ? MATRIX_EDIT_OK : MATRIX_EDIT_BAD_REQUEST;
 }
@@ -29,12 +21,13 @@ MatrixEditStatus parseFilterFileFor( const MatrixModel& model, const char* ch, c
 MatrixEditResult applyFilterFile( MatrixModel& model, const char* ch, int idx, int preset, const FilterFileRow& row,
                                   uint32_t nowMs )
 {
-  bool bus;
-  if( !channelKind( ch, bus ) )
+  MatrixChannelKind kind;
+  if( !parseChannelKind( ch, kind ) )
     return { MATRIX_EDIT_BAD_REQUEST, "unknown channel kind" };
+  const bool bus = ( kind == MATRIX_BUS );
   DynamicJsonDocument doc( filterFilePatchCapacity( row ) );
   JsonObject patch = doc.to<JsonObject>();
-  patch["ch"] = bus ? "bus" : "out";
+  patch["ch"] = channelKindName( kind );
   patch["idx"] = idx;
   patch["preset"] = preset;
   if( doc.capacity() == 0 || !filterFilePatch( row, bus, patch ) )
@@ -59,8 +52,8 @@ static double decimal( double v )
 MatrixEditStatus exportFilterFile( const MatrixModel& model, const char* ch, int idx, std::string& text )
 {
   FilterFileRow row;
-  bool bus;
-  if( !channelKind( ch, bus ) || !model.filterRow( ch, idx, row ) )
+  MatrixChannelKind kind;
+  if( !parseChannelKind( ch, kind ) || !model.filterRow( ch, idx, row ) )
     return MATRIX_EDIT_BAD_REQUEST;
   row.gain = decimal( row.gain );
   for( size_t i = 0; i < row.blocks.size(); i++ )
@@ -71,6 +64,6 @@ MatrixEditStatus exportFilterFile( const MatrixModel& model, const char* ch, int
     b.q = decimal( b.q );
     b.s = decimal( b.s );
   }
-  text = writeFilterFile( row, bus );
+  text = writeFilterFile( row, kind == MATRIX_BUS );
   return MATRIX_EDIT_OK;
 }

@@ -2361,8 +2361,22 @@ static void largestPresetLoadsAndABloatedFileIsRejected()
   assert(m.savePreset() == before);
 }
 
+static void channelKindNamesOnlyBusAndOut()
+{
+  MatrixChannelKind kind = MATRIX_OUT;
+  assert(parseChannelKind("bus", kind) && kind == MATRIX_BUS);
+  assert(parseChannelKind("out", kind) && kind == MATRIX_OUT);
+  assert(!parseChannelKind("addon", kind));
+  assert(!parseChannelKind("Bus", kind));
+  assert(!parseChannelKind("", kind));
+  assert(!parseChannelKind(NULL, kind));
+  assert(std::string(channelKindName(MATRIX_BUS)) == "bus");
+  assert(std::string(channelKindName(MATRIX_OUT)) == "out");
+}
+
 int main()
 {
+  channelKindNamesOnlyBusAndOut();
   editResultsDistinguishSuccessBadRequestAndConflict();
   editStatusesMapToDistinctHttpReplies();
   stateCarriesTheActivePreset();

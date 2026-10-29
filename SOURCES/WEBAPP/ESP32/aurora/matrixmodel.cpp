@@ -10,6 +10,24 @@ static std::string toString( const JsonDocument& doc );
 
 static const int kPresetVersion = 3;
 
+bool parseChannelKind( const char* ch, MatrixChannelKind& kind )
+{
+  if( !ch )
+    return false;
+  if( strcmp( ch, "bus" ) == 0 )
+    kind = MATRIX_BUS;
+  else if( strcmp( ch, "out" ) == 0 )
+    kind = MATRIX_OUT;
+  else
+    return false;
+  return true;
+}
+
+const char* channelKindName( MatrixChannelKind kind )
+{
+  return kind == MATRIX_BUS ? "bus" : "out";
+}
+
 /*! Add-on B config [addr, reg, data] (bytes 0-255) of a patch or a Preset file; NULL or the reason. */
 static const char* readAddOn( JsonArray i2c, MatrixAddOn& cfg )
 {
@@ -788,9 +806,10 @@ std::string MatrixModel::applyPatch( JsonObject patch, uint32_t nowMs )
     }
     return "";
   }
-  const bool isBus = ( strcmp( kind, "bus" ) == 0 );
-  if( !isBus && strcmp( kind, "out" ) != 0 )
+  MatrixChannelKind chKind;
+  if( !parseChannelKind( kind, chKind ) )
     return "unknown channel kind";
+  const bool isBus = ( chKind == MATRIX_BUS );
   if( !patch["idx"].is<int>() )
     return "missing idx";
   const int idx = patch["idx"].as<int>();
@@ -1011,9 +1030,10 @@ void MatrixModel::applyAll( void )
 
 std::string MatrixModel::coeffsJson( const char* ch, int idx ) const
 {
-  const bool isBus = ( strcmp( ch, "bus" ) == 0 );
-  if( !isBus && strcmp( ch, "out" ) != 0 )
+  MatrixChannelKind kind;
+  if( !parseChannelKind( ch, kind ) )
     return "";
+  const bool isBus = ( kind == MATRIX_BUS );
   if( idx < 0 || idx >= ( isBus ? nbus_ : nout_ ) )
     return "";
   const Channel& c = isBus ? bus_[idx] : out_[idx];
@@ -1043,8 +1063,11 @@ bool MatrixModel::filterRow( const char* ch, int idx, FilterFileRow& row ) const
 {
   static const FilterFileType types[] = { FILTERFILE_PEQ, FILTERFILE_HP, FILTERFILE_LP, FILTERFILE_LSHELF,
                                           FILTERFILE_HSHELF, FILTERFILE_PHASE };  // by SlotType
-  const bool isBus = ( strcmp( ch, "bus" ) == 0 );
-  if( ( !isBus && strcmp( ch, "out" ) != 0 ) || idx < 0 || idx >= ( isBus ? nbus_ : nout_ ) )
+  MatrixChannelKind kind;
+  if( !parseChannelKind( ch, kind ) )
+    return false;
+  const bool isBus = ( kind == MATRIX_BUS );
+  if( idx < 0 || idx >= ( isBus ? nbus_ : nout_ ) )
     return false;
   const Channel& c = isBus ? bus_[idx] : out_[idx];
   row.hasName = true;

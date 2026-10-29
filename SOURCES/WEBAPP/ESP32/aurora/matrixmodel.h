@@ -14,6 +14,12 @@
 
 enum MatrixChannelKind { MATRIX_BUS, MATRIX_OUT };
 
+/*! The Channel kind a request names: "bus" or "out" (case-sensitive). false for anything else
+ *  and for NULL. */
+bool parseChannelKind( const char* ch, MatrixChannelKind& kind );
+/*! "bus" or "out". */
+const char* channelKindName( MatrixChannelKind kind );
+
 struct FilterFileRow;  // filterfile.h
 
 /*! Add-on B (SPDIF mux) I2C config of a Preset: one register write. set = false:
