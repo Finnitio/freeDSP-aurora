@@ -151,9 +151,20 @@ function drawPresetName(){
   presetNames[st.preset]=st.presetname||"";
   if(a&&a.id=="presetname")return;
   document.getElementById("pname").innerHTML="<input type='text' class='name' id='presetname' maxlength='16' placeholder='Preset name' value=\""
-   +esc(st.presetname||"")+"\" onchange='sendPresetName(this.value)'>";
+   +esc(st.presetname||"")+"\" oninput='this.value=fitName(this.value)' onchange='sendPresetName(this.value)'>";
 }
-function sendPresetName(v){return post({ch:"preset",name:v,preset:activePreset});}
+// v cut to the 16 UTF-8 bytes a name holds (MATRIX_NAME_LEN), whole characters only.
+function fitName(v){
+  var out="",n=0;
+  for(var c of v){
+    var u=c.codePointAt(0);
+    n+=u<0x80?1:u<0x800?2:u<0x10000?3:4;
+    if(n>16)break;
+    out+=c;
+  }
+  return out;
+}
+function sendPresetName(v){return post({ch:"preset",name:fitName(v),preset:activePreset});}
 // "A" or "A · name": a Preset with its name, where only real names may show (Evaluation).
 function presetLabel(p){return "ABCD"[p]+(presetNames[p]?" \u00b7 "+esc(presetNames[p]):"");}
 function drawPresets(cur){  // during a Preset test no slot is marked: the row is hidden, not removed
@@ -248,7 +259,7 @@ function linkOpts(ch,sel){
     return "<option value='"+id+"'"+(id==sel?" selected":"")+">"+name+"</option>";}).join("");
 }
 function row(ch,idx,c,sel){
-  return "<div class='row'><input type='text' class='name' maxlength='16' value=\""+esc(c.name)+"\" onchange=\"send('"+ch+"',"+idx+",{name:this.value})\">"
+  return "<div class='row'><input type='text' class='name' maxlength='16' value=\""+esc(c.name)+"\" oninput='this.value=fitName(this.value)' onchange=\"send('"+ch+"',"+idx+",{name:this.value})\">"
    +sel
    +"<select title='Link group' onchange=\"send('"+ch+"',"+idx+",{link:this.value})\">"+linkOpts(ch,c.link)+"</select>"
    +"<button class='mute"+(c.mute?" on":"")+"' onclick=\"send('"+ch+"',"+idx+",{mute:"+!c.mute+"})\">"+(c.mute?"Muted":"Mute")+"</button>"

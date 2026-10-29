@@ -1026,8 +1026,34 @@ function stats() {
   assert(p50 > 0 && p50 < 1, "50 Votes on 4 Presets give a p-value in range");
 }
 
+// A Preset name holds at most 16 UTF-8 bytes (MATRIX_NAME_LEN), not 16 characters.
+async function presetNameBytes() {
+  const bytes = (s) => Buffer.byteLength(s, "utf8");
+  assert.strictEqual(context.fitName("Movie night"), "Movie night");
+  assert.strictEqual(context.fitName("0123456789abcdefXYZ"), "0123456789abcdef");
+  assert.strictEqual(context.fitName("\u00e4".repeat(9)), "\u00e4".repeat(8), "2-byte characters: 8 fit");
+  assert.strictEqual(context.fitName("abc" + "\u{1F3B5}".repeat(4)), "abc" + "\u{1F3B5}".repeat(3),
+                     "a 4-byte character is not split");
+  context.activePreset = 1;
+  context.switching = false;
+  context.ab = null;
+  context.draw = () => {};
+  context.fetch = (url, options) => {
+    request = { url, options };
+    return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("{}") });
+  };
+  await context.sendPresetName("\u00f6".repeat(12));
+  const name = JSON.parse(request.options.body).name;
+  assert.strictEqual(request.url, "/matrix");
+  assert(bytes(name) <= 16, "the posted name fits 16 bytes: " + bytes(name));
+  assert.strictEqual(name, "\u00f6".repeat(8));
+  const header = fs.readFileSync("SOURCES/WEBAPP/ESP32/aurora/matrixpage.h", "utf8");
+  assert(/id='presetname'[^>]*oninput='this.value=fitName\(this.value\)'/.test(header),
+         "the field cuts the name to 16 bytes while it is typed");
+}
+
 stats();
-main().catch((error) => {
+main().then(presetNameBytes).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
