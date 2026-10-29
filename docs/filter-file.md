@@ -30,6 +30,15 @@ calculated.
   There is no undo.
 - The blocks take the Channel's biquads in file order. They must fit the Channel's Biquad budget.
 
+## Export
+
+"Export filter file" in a Channel's filter dialog (`GET /matrix/filterfile?ch=bus|out&idx=n`)
+downloads its Filter row in this format: every line written, gain, delay and polarity as stored
+(also when bypassed), each Slot as a block with Aurora's coefficients (`%.17g`). A name the
+format cannot carry (empty, surrounding blanks, control characters) is left out. Importing the
+file into the same Channel restores it, apart from gain and delay bypass, which an import
+switches off.
+
 ## Syntax
 
 - The file is UTF-8 text, at most 16384 bytes. A leading BOM is ignored. Lines end in LF or CRLF.

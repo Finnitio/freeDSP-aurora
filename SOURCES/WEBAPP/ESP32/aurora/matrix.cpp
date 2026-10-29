@@ -276,6 +276,16 @@ std::string matrixCoeffs( const char* ch, int idx )
   return model->coeffsJson( ch, idx );
 }
 
+std::string matrixFilterFile( const char* ch, int idx )
+{
+  std::string text;
+  if( !model )
+    return text;
+  ModelLock lock;
+  exportFilterFile( *model, ch, idx, text );
+  return text;
+}
+
 void matrixWriteBaseline( void )
 {
   if( !model )

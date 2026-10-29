@@ -133,6 +133,7 @@ async function main() {
   await commitTests();
   await switchTests();
   await exportImportTests();
+  filterFileExportTests();
   await presetUsedTests();
   await presetNameTests();
   await presetTestTests();
@@ -458,6 +459,22 @@ async function switchTests() {
   assert.deepStrictEqual(sent.map((x) => x.body),
     [{ ch: "out", idx: 0, preset: 1, slot: { op: "set", i: 0, freq: 800 } }]);
   focus(null);
+}
+
+// ---- Filter file export: the filter dialog downloads the open Channel's file from the firmware.
+function filterFileExportTests() {
+  const flt = header.match(/<div id="flt"[\s\S]*?<\/div>\n<div id="wifi"/);
+  const link = flt && flt[0].match(/<a\b[^>]*id="fexport"[^>]*>/);
+  assert(link && /\bdownload\b/.test(link[0]), "the filter dialog offers a Filter file download");
+  context.document.getElementById = element;
+  context.st = sample();
+  context.coeffs = () => {};
+  context.openF("out", 0);
+  assert.strictEqual(element("fexport").href, "/matrix/filterfile?ch=out&idx=0");
+  context.openF("bus", 0);
+  assert.strictEqual(element("fexport").href, "/matrix/filterfile?ch=bus&idx=0",
+    "the link follows the open Channel");
+  context.closeF();
 }
 
 // ---- Autosave is the only save: Export/Import of a Preset file is the only manual save/load.

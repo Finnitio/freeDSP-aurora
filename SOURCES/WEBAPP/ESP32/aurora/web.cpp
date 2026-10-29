@@ -1940,6 +1940,23 @@ void setupWebserver (void)
   {
     // The matrix page is part of the firmware; the model runs here, only the DSP writes are queued.
     server.on( "/",       HTTP_GET, [](AsyncWebServerRequest *request ) { request->send( 200, "text/html", matrixpage_html ); });
+    // Filter file export of one Channel: ?ch=bus|out&idx=n. Before "/matrix", which would take
+    // every GET below /matrix/.
+    server.on( "/matrix/filterfile", HTTP_GET, [](AsyncWebServerRequest *request )
+    {
+      std::string text;
+      if( request->hasParam( "ch" ) && request->hasParam( "idx" ) )
+        text = matrixFilterFile( request->getParam( "ch" )->value().c_str(), request->getParam( "idx" )->value().toInt() );
+      if( text.empty() )
+      {
+        request->send( 400, "text/plain", "no such channel" );
+        return;
+      }
+      AsyncWebServerResponse* response = request->beginResponse( 200, "text/plain; charset=utf-8", text.c_str() );
+      response->addHeader( "Content-Disposition", "attachment; filename=\"filter-" + request->getParam( "ch" )->value()
+                           + String( request->getParam( "idx" )->value().toInt() + 1 ) + ".txt\"" );
+      request->send( response );
+    });
     server.on( "/matrix", HTTP_GET, [](AsyncWebServerRequest *request ) { request->send( 200, "application/json", matrixState().c_str() ); });
     server.on( "/matrix/coeffs", HTTP_GET, [](AsyncWebServerRequest *request )
     {

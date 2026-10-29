@@ -67,7 +67,7 @@ button:disabled{opacity:.4}
 <div class="row"><select id="spdif" onchange="send('spdif',0,{sel:parseInt(this.value)})"></select></div>
 </div>
 <div id="flt" style="display:none">
-<div class="row"><button class="mute" onclick="closeF()">Back</button><h2 id="ftitle" style="margin:0"></h2></div>
+<div class="row"><button class="mute" onclick="closeF()">Back</button><h2 id="ftitle" style="margin:0"></h2><a id="fexport" class="file" download>Export filter file</a></div>
 <canvas id="plot" width="600" height="200"></canvas>
 <div id="top"></div>
 <div id="budget"></div>
@@ -300,6 +300,7 @@ document.addEventListener("focusout",function(){if(late&&!down)setTimeout(draw,0
 function chan(){return (view.ch=="bus"?st.buses:st.outs)[view.idx];}
 function openF(ch,i){view={ch:ch,idx:i};cf=null;cseq++;csig="";late=false;  // drop replies for the previous Channel
   document.getElementById("main").style.display="none";document.getElementById("flt").style.display="";
+  document.getElementById("fexport").href="/matrix/filterfile?ch="+ch+"&idx="+i;  // Filter file export
   drawF();}
 function closeF(){view=null;late=false;
   document.getElementById("main").style.display="";document.getElementById("flt").style.display="none";draw();}

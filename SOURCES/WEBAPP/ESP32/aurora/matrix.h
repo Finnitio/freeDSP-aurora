@@ -78,6 +78,9 @@ std::string matrixPresetName( uint8_t preset );
 /*! Active biquad coefficients of one Channel (ch "bus" or "out") for the plot; "" if unknown. */
 std::string matrixCoeffs( const char* ch, int idx );
 
+/*! Filter file export (docs/filter-file.md) of Channel ch ("bus" or "out") idx; "" if unknown. */
+std::string matrixFilterFile( const char* ch, int idx );
+
 /*! Call from loop(): queues the Autosave of the Preset and the store of the
  *  master volume once the changes have settled. */
 void matrixLoop( void );
